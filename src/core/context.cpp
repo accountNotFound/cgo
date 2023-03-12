@@ -41,7 +41,13 @@ class RunnableSet : public CoroutineSet {
 thread_local Context* Context::_current_context = nullptr;
 thread_local Coroutine* Context::_running_coroutine = nullptr;
 
-Context::Context() { this->_runnable_set = std::make_unique<RunnableSet>(this->_mutex); }
+Context::Context() {
+  if (Context::_current_context) {
+    // TODO: throw exception or exit
+  }
+  Context::_current_context = this;
+  this->_runnable_set = std::make_unique<RunnableSet>(this->_mutex);
+}
 
 auto Context::initialize(size_t executor_num) -> void {
   this->_finish = false;
@@ -66,8 +72,7 @@ auto Context::start(std::unique_ptr<AsyncTrait>&& func, const std::string& name)
 
 auto Context::yield(const Callback& defer) -> std::suspend_always {
   auto tid = std::this_thread::get_id();
-  DEBUG("[TH-{%u}]:: yield coroutine{%s}", tid, Context::_running_coroutine->name().data());
-  Context::_running_coroutine->set_status(Coroutine::Status::Yield);
+  DEBUG("[TH-{%u}]: yield coroutine{%s}", tid, Context::_running_coroutine->name().data());
   this->_runnable_set->push(std::move(*Context::_running_coroutine));
   Context::_running_coroutine = nullptr;
   if (defer) {
@@ -78,8 +83,7 @@ auto Context::yield(const Callback& defer) -> std::suspend_always {
 
 auto Context::wait(CoroutineSet* block_set, const Callback& defer) -> std::suspend_always {
   auto tid = std::this_thread::get_id();
-  DEBUG("[TH-{%u}]:: suspend coroutine{%s}", tid, Context::_running_coroutine->name().data());
-  Context::_running_coroutine->set_status(Coroutine::Status::Blocked);
+  DEBUG("[TH-{%u}]: suspend coroutine{%s}", tid, Context::_running_coroutine->name().data());
   block_set->push(std::move(*Context::_running_coroutine));
   Context::_running_coroutine = nullptr;
   if (defer) {
@@ -89,9 +93,11 @@ auto Context::wait(CoroutineSet* block_set, const Callback& defer) -> std::suspe
 }
 
 auto Context::notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer) -> void {
+  auto tid = std::this_thread::get_id();
   for (auto& set : block_sets) {
     auto coro_wrapper = set->pop();
     if (coro_wrapper.has_value()) {
+      DEBUG("[TH-{%u}]: notify coroutine{%s}", tid, coro_wrapper.value().name().data());
       this->_runnable_set->push(std::move(coro_wrapper.value()));
     }
   }
@@ -104,24 +110,24 @@ auto Context::_schedule_loop() -> void {
   auto tid = std::this_thread::get_id();
   Context::_current_context = this;
   while (!this->_finish) {
+    DEBUG("[TH-{%u}]: continue", tid);
     auto coro_wrapper = this->_runnable_set->pop();
     if (!coro_wrapper.has_value()) {
-      DEBUG("[TH-{%u}]:: sleep", tid);
+      DEBUG("[TH-{%u}]: sleep", tid);
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
-    auto& coro = coro_wrapper.value();
-    coro.set_status(Coroutine::Status::Runnable);
-    Context::_running_coroutine = &coro;
-    const char* name = coro.name().data();
-    DEBUG("[TH-{%u}]:: start execute coroutine{%s}", tid, name);
-    while (!coro.done() && coro.status() == Coroutine::Status::Runnable) {
-      coro.resume();
-      if (!Context::_running_coroutine) {
-        break;
-      }
+    Context::_running_coroutine = &coro_wrapper.value();
+    auto name = Context::_running_coroutine->name().data();
+    DEBUG("[TH-{%u}]: execute start: coroutine{%s}", tid, name);
+    while (Context::_running_coroutine && !Context::_running_coroutine->done()) {
+      // DEBUG("[TH-{%u}]: resume start: coroutine{%s}", tid, name);
+      Context::_running_coroutine->resume();
+      // `current_coroutine` may be set to nullptr in yield() and wait() in resume() frame, in which case this
+      // coroutine is moved to corresponding set. Break this resume loop and get next runnable coroutine
+      // DEBUG("[TH-{%u}]: resume end: coroutine{%s}", tid, name);
     }
-    DEBUG("[TH-{%u}]:: end execute coroutine{%s}", tid, name);
+    DEBUG("[TH-{%u}]: execute end: coroutine{%s}", tid, name);
   }
 }
 

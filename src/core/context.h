@@ -6,36 +6,27 @@
 #include <thread>
 #include <vector>
 
-#include "util/spin_lock.h"
 #include "async.h"
+#include "util/spin_lock.h"
 
 namespace cgo::impl {
 
 class Coroutine {
- public:
-  enum Status {
-    Runnable = 0,
-    Blocked,
-    Yield,
-  };
-
  public:
   Coroutine(std::unique_ptr<AsyncTrait>&& func, const std::string& name = "");
   auto start() -> void { this->_func->start(); }
   auto resume() -> void { this->_func->resume(); }
   auto done() const -> bool { return this->_func->done(); }
   auto name() const -> const std::string& { return this->_name; }
-  auto status() const -> Status { return this->_status; }
-  auto set_status(Status s) -> void { this->_status = s; }
 
  private:
   std::unique_ptr<AsyncTrait> _func;
   const std::string _name;
-  Status _status = Status::Runnable;
 };
 
 class CoroutineSet {
  public:
+  CoroutineSet() { this->_mutex = &this->_local_mutex; }
   CoroutineSet(SpinLock& mutex) : _mutex(&mutex) {}
   auto lock() -> void { this->_mutex->lock(); }
   auto unlock() -> void { this->_mutex->unlock(); }
@@ -45,7 +36,8 @@ class CoroutineSet {
   virtual auto pop_nolock() -> std::optional<Coroutine> = 0;
 
  private:
-  SpinLock* _mutex;
+  SpinLock* _mutex = nullptr;
+  SpinLock _local_mutex = {};
 };
 
 class Context {
