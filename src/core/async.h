@@ -10,6 +10,9 @@ namespace cgo::impl {
 
 using HandlerTrait = std::coroutine_handle<>;
 
+template <typename T>
+concept NoVoid = requires(T) { !std::is_same_v<T, void>; };
+
 class AsyncTrait;
 
 class PromiseTrait {
@@ -21,7 +24,7 @@ class PromiseTrait {
   auto wrapper() -> AsyncTrait& { return *this->_wrapper; }
 
  public:
-  template <typename T>
+  template <NoVoid T>
   auto get() -> T {
     if constexpr (!std::is_same_v<T, std::any>) {
       return std::any_cast<T>(std::move(this->_value));
@@ -59,7 +62,8 @@ class Promise<void> : public PromiseTrait {
 class AsyncTrait {
  public:
   AsyncTrait(const AsyncTrait&) = delete;
-  AsyncTrait(AsyncTrait&&) = default;
+  AsyncTrait(AsyncTrait&&);
+  ~AsyncTrait();
   auto start() -> void;
   auto resume() -> void;
   auto done() const -> bool;
@@ -97,7 +101,11 @@ class Async : public AsyncTrait {
   }
 
  public:
-  auto await_resume() -> T { return this->_promise->get<T>(); }
+  auto await_resume() -> T {
+    if constexpr (!std::is_same_v<T, void>) {
+      return this->_promise->get<T>();
+    }
+  }
 
  private:
   Async(std::coroutine_handle<promise_type> handler) : AsyncTrait(handler) {}
