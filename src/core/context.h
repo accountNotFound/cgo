@@ -49,17 +49,18 @@ class Context {
 
  public:
   Context();
-  auto initialize(size_t executor_num) -> void;
-  auto finalize() -> void;
-  auto start(std::unique_ptr<AsyncTrait>&& func, const std::string& name = "") -> void;
+  ~Context();
+  auto start(size_t executor_num) -> void;
+  auto stop() -> void;
+  auto spawn(std::unique_ptr<AsyncTrait>&& func, const std::string& name = "") -> void;
   auto yield(const Callback& defer = nullptr) -> std::suspend_always;
   auto wait(CoroutineSet* block_set, const Callback& defer = nullptr) -> std::suspend_always;
   auto notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer = nullptr) -> void;
 
  public:
   template <typename T>
-  auto start(Async<T>&& func, const std::string& name = "") -> void {
-    this->start(std::make_unique<Async<T>>(std::move(func)), name);
+  auto spawn(Async<T>&& func, const std::string& name = "") -> void {
+    this->spawn(std::make_unique<Async<T>>(std::move(func)), name);
   }
 
  private:

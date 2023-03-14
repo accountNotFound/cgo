@@ -60,4 +60,20 @@ auto ChanTrait::_recv() -> Async<std::any> {
   }
 }
 
+auto ChanTrait::_send_nowait(std::any&& value) -> void {
+  auto defer = [this]() { this->_mutex->unlock(); };
+  this->_mutex->lock();
+  this->_queue.push(std::move(value));
+  Context::current().notify({this->_block_readers.get(), this->_block_writers.get()}, defer);
+}
+
+auto ChanTrait::_recv_nowait() -> std::any {
+  auto defer = [this]() { this->_mutex->unlock(); };
+  this->_mutex->lock();
+  auto res = std::move(this->_queue.front());
+  this->_queue.pop();
+  Context::current().notify({this->_block_readers.get(), this->_block_writers.get()}, defer);
+  return res;
+}
+
 }  // namespace cgo::impl

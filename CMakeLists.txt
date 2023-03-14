@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0.0)
 project(cgo VERSION 0.1.0)
 
 set(CMAKE_CXX_COMPILE "g++")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -fcoroutines -pthread -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -fcoroutines -pthread")
 set(CMAKE_BUILD_TYPE "debug")
 
 include(CTest)
