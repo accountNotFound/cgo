@@ -13,8 +13,6 @@
 
 using namespace cgo::impl;
 
-Context ctx;
-
 namespace single_channel_test {
 
 const size_t exec_num = 10;
@@ -29,22 +27,23 @@ Async<void> foo(const std::string& name) {
     co_await lock.send(true);
     DEBUG("[TH-{%u}]: coroutine(%s) lock", std::this_thread::get_id(), name.data());
     end_num++;
-    co_await lock.recv();
+    lock.recv_nowait();
     DEBUG("[TH-{%u}]: coroutine(%s) unlock", std::this_thread::get_id(), name.data());
   }
   DEBUG("[TH-{%u}]: coroutine(%s) end", std::this_thread::get_id(), name.data());
 }
 
 int test() {
-  ctx.initialize(exec_num);
+  Context ctx;
+  ctx.start(exec_num);
   for (int i = 0; i < foo_num; i++) {
     std::string name = "foo_" + std::to_string(i);
-    ctx.start(foo(name), name);
+    ctx.spawn(foo(name), name);
   }
   while (end_num < foo_num * foo_loop) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.finalize();
+  ctx.stop();
   if (end_num != foo_num * foo_loop) {
     return -1;
   }

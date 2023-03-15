@@ -49,14 +49,19 @@ Context::Context() {
   this->_runnable_set = std::make_unique<RunnableSet>(this->_mutex);
 }
 
-auto Context::initialize(size_t executor_num) -> void {
+Context::~Context() {
+  this->stop();
+  Context::_current_context = nullptr;
+}
+
+auto Context::start(size_t executor_num) -> void {
   this->_finish = false;
   for (int i = 0; i < executor_num; i++) {
     this->_executors.emplace_back(std::thread(std::bind(&Context::_schedule_loop, this)));
   }
 }
 
-auto Context::finalize() -> void {
+auto Context::stop() -> void {
   this->_finish = true;
   for (auto& exec : this->_executors) {
     exec.join();
@@ -64,7 +69,7 @@ auto Context::finalize() -> void {
   this->_executors.clear();
 }
 
-auto Context::start(std::unique_ptr<AsyncTrait>&& func, const std::string& name) -> void {
+auto Context::spawn(std::unique_ptr<AsyncTrait>&& func, const std::string& name) -> void {
   Coroutine coro(std::move(func), name);
   coro.start();
   this->_runnable_set->push(std::move(coro));
@@ -114,7 +119,7 @@ auto Context::_schedule_loop() -> void {
     auto coro_wrapper = this->_runnable_set->pop();
     if (!coro_wrapper.has_value()) {
       DEBUG("[TH-{%u}]: sleep", tid);
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
       continue;
     }
     Context::_running_coroutine = &coro_wrapper.value();

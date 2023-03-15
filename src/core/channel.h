@@ -12,6 +12,8 @@ class ChanTrait {
   ChanTrait(size_t capacity);
   auto _send(std::any&& value) -> Async<void>;
   auto _recv() -> Async<std::any>;
+  auto _send_nowait(std::any&& value) -> void;
+  auto _recv_nowait() -> std::any;
 
  private:
   std::shared_ptr<SpinLock> _mutex;
@@ -34,6 +36,14 @@ class Channel : private ChanTrait {
       co_return std::any_cast<T>(co_await this->_recv());
     } else {
       co_return co_await this->_recv();
+    }
+  }
+  auto send_nowait(T&& value) { this->_send_nowait(std::move(value)); }
+  auto recv_nowait() -> T {
+    if constexpr (!std::is_same_v<T, std::any>) {
+      return std::any_cast<T>(this->_recv_nowait());
+    } else {
+      return this->_recv_nowait();
     }
   }
 };
