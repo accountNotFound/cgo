@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 
@@ -7,15 +8,16 @@ namespace cgo::impl {
 
 class SpinLock {
  public:
-  SpinLock();
-  ~SpinLock();
-
-  void lock();
-  void unlock();
+  void lock() {
+    bool expected = false;
+    while (!_flag.compare_exchange_weak(expected, true)) {
+      expected = false;
+    }
+  }
+  void unlock() { _flag.store(false); }
 
  private:
-  class Impl;
-  std::unique_ptr<Impl> _impl;
+  std::atomic<bool> _flag = false;
 };
 
 }  // namespace cgo::impl
