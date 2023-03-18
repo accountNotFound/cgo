@@ -23,65 +23,63 @@ class BlockSet : public CoroutineSet {
   std::queue<Coroutine> _queue;
 };
 
-ChanTrait::ChanTrait(size_t capacity) : _capacity(capacity) {
-  this->_mutex = std::make_shared<SpinLock>();
-  this->_block_readers = std::make_shared<BlockSet>();
-  this->_block_writers = std::make_shared<BlockSet>();
-  this->_queue = std::make_shared<std::queue<std::any>>();
+ChanImpl::ChanImpl(size_t capacity) : _capacity(capacity) {
+  this->_block_readers = std::make_unique<BlockSet>();
+  this->_block_writers = std::make_unique<BlockSet>();
 }
 
-auto ChanTrait::_send(std::any&& value) -> Async<void> {
-  auto defer = [this]() { this->_mutex->unlock(); };
+auto ChanImpl::send(std::any&& value) -> Async<void> {
+  auto defer = [this]() { this->_mutex.unlock(); };
   while (true) {
-    this->_mutex->lock();
-    DEBUG("[TH-{%u}]: send: queue_size=%d", std::this_thread::get_id(), this->_queue->size());
-    if (this->_queue->size() == this->_capacity) {
+    this->_mutex.lock();
+    DEBUG("[TH-{%u}]: send: queue_size=%d", std::this_thread::get_id(), this->_queue.size());
+    if (this->_queue.size() == this->_capacity) {
       co_await Context::current().wait(this->_block_writers.get(), defer);
     } else {
-      this->_queue->push(std::move(value));
+      this->_queue.push(std::move(value));
       Context::current().notify({this->_block_readers.get(), this->_block_writers.get()}, defer);
       co_return;
     }
   }
 }
 
-auto ChanTrait::_recv() -> Async<std::any> {
-  auto defer = [this]() { this->_mutex->unlock(); };
+auto ChanImpl::recv() -> Async<std::any> {
+  auto defer = [this]() { this->_mutex.unlock(); };
   while (true) {
-    this->_mutex->lock();
-    DEBUG("[TH-{%u}]: recv: queue_size=%d", std::this_thread::get_id(), this->_queue->size());
-    if (this->_queue->size() == 0) {
+    this->_mutex.lock();
+    DEBUG("[TH-{%u}]: recv: queue_size=%d", std::this_thread::get_id(), this->_queue.size());
+    if (this->_queue.size() == 0) {
       co_await Context::current().wait(this->_block_readers.get(), defer);
     } else {
-      auto res = std::move(this->_queue->front());
-      this->_queue->pop();
+      auto res = std::move(this->_queue.front());
+      this->_queue.pop();
       Context::current().notify({this->_block_readers.get(), this->_block_writers.get()}, defer);
       co_return std::move(res);
     }
   }
 }
 
-auto ChanTrait::_send_nowait(std::any&& value) -> bool {
-  auto defer = [this]() { this->_mutex->unlock(); };
-  this->_mutex->lock();
-  if (this->_queue->size() == this->_capacity) {
+auto ChanImpl::send_nowait(std::any&& value) -> bool {
+  auto defer = [this]() { this->_mutex.unlock(); };
+  this->_mutex.lock();
+  if (this->_queue.size() == this->_capacity) {
     defer();
     return false;
   }
-  this->_queue->push(std::move(value));
+  this->_queue.push(std::move(value));
   Context::current().notify({this->_block_readers.get(), this->_block_writers.get()}, defer);
   return true;
 }
 
-auto ChanTrait::_recv_nowait() -> std::any {
-  auto defer = [this]() { this->_mutex->unlock(); };
-  this->_mutex->lock();
-  if (this->_queue->empty()) {
+auto ChanImpl::recv_nowait() -> std::any {
+  auto defer = [this]() { this->_mutex.unlock(); };
+  this->_mutex.lock();
+  if (this->_queue.empty()) {
     defer();
     return std::any{};
   }
-  auto res = std::move(this->_queue->front());
-  this->_queue->pop();
+  auto res = std::move(this->_queue.front());
+  this->_queue.pop();
   Context::current().notify({this->_block_readers.get(), this->_block_writers.get()}, defer);
   return res;
 }
