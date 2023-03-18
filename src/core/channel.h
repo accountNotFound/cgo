@@ -27,9 +27,7 @@ template <NoVoid T>
 class Channel {
  public:
   Channel(size_t capacity) : _impl(std::make_shared<ChanImpl>(capacity)) {}
-  auto send(T&& value) -> Async<void> {
-    co_await this->_impl->send(std::make_any<T>(std::move(value)));
-  }
+  auto send(T&& value) -> Async<void> { co_await this->_impl->send(std::make_any<T>(std::move(value))); }
   auto recv() -> Async<T> {
     if constexpr (!std::is_same_v<T, std::any>) {
       co_return std::any_cast<T>(co_await this->_impl->recv());
@@ -52,6 +50,17 @@ class Channel {
 
  private:
   std::shared_ptr<ChanImpl> _impl;
+};
+
+class Mutex {
+ public:
+  Mutex();
+  auto lock() -> Async<void>;
+  auto unlock() -> void;
+
+ private:
+  class Impl;
+  std::shared_ptr<Impl> _impl;
 };
 
 }  // namespace cgo::impl

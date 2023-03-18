@@ -84,4 +84,38 @@ auto ChanImpl::recv_nowait() -> std::any {
   return res;
 }
 
+class Mutex::Impl {
+ public:
+  Impl() : _block_set(std::make_unique<BlockSet>()) {}
+  auto lock() -> Async<void> {
+    auto defer = [this]() { this->_mutex.unlock(); };
+    while (true) {
+      this->_mutex.lock();
+      if (this->_lock_flag) {
+        co_await Context::current().wait({this->_block_set.get()}, defer);
+      } else {
+        this->_lock_flag = true;
+        defer();
+        co_return;
+      }
+    }
+  }
+  auto unlock() -> void {
+    std::unique_lock guard(this->_mutex);
+    this->_lock_flag = false;
+    Context::current().notify({this->_block_set.get()});
+  }
+
+ private:
+  SpinLock _mutex;
+  std::unique_ptr<BlockSet> _block_set;
+  bool _lock_flag = false;
+};
+
+Mutex::Mutex() : _impl(std::make_shared<Impl>()) {}
+
+auto Mutex::lock() -> Async<void> { co_await this->_impl->lock(); }
+
+auto Mutex::unlock() -> void { this->_impl->unlock(); }
+
 }  // namespace cgo::impl
