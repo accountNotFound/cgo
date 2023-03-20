@@ -9,6 +9,7 @@ include(CTest)
 enable_testing()
 
 add_subdirectory("src/core")
+add_subdirectory("src/aio")
 add_subdirectory("src/util")
 add_subdirectory("test")
 

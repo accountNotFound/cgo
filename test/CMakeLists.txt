@@ -8,3 +8,6 @@ target_link_libraries(yield_test cgo_core cgo_util)
 
 add_executable(channel_test channel_test.cpp)
 target_link_libraries(channel_test cgo_core cgo_util)
+
+add_executable(aio_test aio_test.cpp)
+target_link_libraries(aio_test cgo_core cgo_aio cgo_util)

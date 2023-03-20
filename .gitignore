@@ -1,3 +1,4 @@
 .vscode
 /build
 /tmp
+/test_stat/log
