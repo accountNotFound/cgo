@@ -16,6 +16,7 @@ add_subdirectory("test")
 add_test("async-test" async_test)
 add_test("yield-test" yield_test)
 add_test("channel-test" channel_test)
+add_test("aio-test" aio_test)
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})

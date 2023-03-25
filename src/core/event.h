@@ -14,12 +14,17 @@ class Event {
   Event(Fd fd, Type types) : _fd(fd), _types(types), _chan(1) {}
   auto fd() const -> Fd { return this->_fd; }
   auto types() const -> Type { return this->_types; }
-  auto chan() const -> Channel<bool> { return this->_chan; }
+  auto chan() const -> Channel<Event::Type> { return this->_chan; }
+
+#if defined(linux) || defined(__linux) || defined(__linux__)
+  auto to_linux() const -> size_t;
+  auto from_linux(size_t linux_event) const -> Event;
+#endif
 
  private:
-  const Fd _fd;
-  const Type _types;
-  Channel<bool> _chan;
+  Fd _fd;
+  Type _types;
+  Channel<Event::Type> _chan;
 };
 
 extern Event::Type operator|(Event::Type a, Event::Type b);
@@ -31,7 +36,7 @@ class EventHandler {
   ~EventHandler();
   void add(Fd fd, Event& on);
   void mod(Fd fd, Event& on);
-  void del(Fd fd, Event& on);
+  void del(Fd fd);
   auto handle(size_t handle_batch = 128, size_t timeout_ms = 50) -> size_t;
 
 #if defined(linux) || defined(__linux) || defined(__linux__)

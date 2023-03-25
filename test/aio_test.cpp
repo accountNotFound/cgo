@@ -52,8 +52,7 @@ int test() {
   size_t theory_ms_cost = (sleep_millisec + sleep_millisec + foo_loop) * foo_loop / 2;
   printf("theory time cost: %u\n", theory_ms_cost);
   printf("real time cost: %u\n", (end_ms - begin_ms).count());
-  size_t tolerance_ms = 1000;
-  if (end_ms - begin_ms > std::chrono::milliseconds(theory_ms_cost + tolerance_ms) ||
+  if (end_ms - begin_ms > std::chrono::milliseconds(theory_ms_cost * 4 / 3) ||
       end_ms - begin_ms < std::chrono::microseconds(theory_ms_cost)) {
     return -1;
   }

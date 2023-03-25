@@ -1,5 +1,6 @@
 #include "atime.h"
 
+#if defined(linux) || defined(__linux) || defined(__linux__)
 #include <sys/timerfd.h>
 
 namespace cgo::impl {
@@ -15,8 +16,7 @@ Timer::Timer(unsigned long long millisec)
 
 auto Timer::wait() -> Async<void> { co_await this->_event.chan().recv(); }
 
-auto Timer::chan() -> Channel<bool> { return this->_event.chan(); }
-
 auto sleep(unsigned long long millisec) -> Async<void> { co_await Timer(millisec).wait(); }
 
 }  // namespace cgo::impl
+#endif
