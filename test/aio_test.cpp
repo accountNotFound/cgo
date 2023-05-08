@@ -19,7 +19,7 @@ constexpr long sleep_millisec = 50;
 Context ctx;
 Mutex lock;
 
-Async<void> foo(const std::string& name) {
+Async<void> foo(std::string name) {
   long ts = 0;
   DEBUG("foo {%s} begin", name.data());
   for (int i = 0; i < foo_loop; ++i) {

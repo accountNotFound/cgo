@@ -22,7 +22,7 @@ size_t end_num = 0;
 // Channel<bool> lock(1);
 Mutex lock;
 
-Async<void> foo(const std::string& name) {
+Async<void> foo(std::string name) {
   DEBUG("[TH-{%u}]: coroutine(%s) start", std::this_thread::get_id(), name.data());
   for (int i = 0; i < foo_loop; i++) {
     // co_await lock.send(true);
@@ -64,7 +64,7 @@ size_t end_num = 0;
 Context ctx;
 Mutex lock;
 
-Async<void> foo(const std::string& name) {
+Async<void> foo(std::string name) {
   DEBUG("%s start", name.data());
   Channel<std::string> outchan(foo_num);
   for (int i = 0; i < foo_loop; i++) {

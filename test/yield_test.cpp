@@ -18,7 +18,7 @@ const size_t foo_loop = 1000;
 SpinLock mutex;
 size_t end_num = 0;
 
-Async<void> foo(const std::string& name) {
+Async<void> foo(std::string name) {
   for (int i = 0; i < foo_loop; i++) {
     DEBUG("before yield, name=%s, index=%d\n", name.data(), i);
     co_await Context::current().yield();
