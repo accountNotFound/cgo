@@ -5,16 +5,21 @@
 
 namespace cgo::impl {
 
-Timer::Timer(unsigned long long millisec)
-    : _fd(::timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK)), _event(_fd, Event::IN | Event::ONESHOT) {
+Timer::Timer(unsigned long long millisec) {
+  this->_fd = ::timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
   ::itimerspec ts;
   ts.it_interval = timespec{0, 0};
   ts.it_value = timespec{(long)millisec / 1000, ((long)millisec % 1000) * 1000000};
   timerfd_settime(_fd, 0, &ts, nullptr);
-  Context::current().handler().add(this->_fd, this->_event);
+  this->_chan = Context::current().handler().add(this->_fd, Event::IN | Event::ONESHOT);
 }
 
-auto Timer::wait() -> Async<void> { co_await this->_event.chan().recv(); }
+Timer::~Timer() {
+  Context::current().handler().del(this->_fd);
+  ::close(this->_fd);
+}
+
+auto Timer::wait() -> Async<void> { co_await this->_chan.recv(); }
 
 auto sleep(unsigned long long millisec) -> Async<void> { co_await Timer(millisec).wait(); }
 

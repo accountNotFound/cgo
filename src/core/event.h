@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unordered_map>
+
 #include "channel.h"
 
 namespace cgo::impl {
@@ -8,41 +10,42 @@ using Fd = size_t;
 
 class Event {
  public:
-  enum Type { IN = 0x1, OUT = 0x2, ERR = 0x4, ONESHOT = 0x8 };
+  static constexpr size_t IN = 0x1;
+  static constexpr size_t OUT = 0x2;
+  static constexpr size_t ERR = 0x4;
+  static constexpr size_t ONESHOT = 0x8;
 
  public:
-  Event(Fd fd, Type types) : _fd(fd), _types(types), _chan(1) {}
-  auto fd() const -> Fd { return this->_fd; }
-  auto types() const -> Type { return this->_types; }
-  auto chan() const -> Channel<Event::Type> { return this->_chan; }
+  Event() = default;
+  Event(size_t events) : _events(events) {}
+  operator size_t() { return this->_events; }
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
-  auto to_linux() const -> size_t;
-  auto from_linux(size_t linux_event) const -> Event;
+
+ public:
+  static auto from_linux(size_t linux_event) -> Event;
+  static auto to_linux(Event cgo_event) -> size_t;
+
 #endif
 
  private:
-  Fd _fd;
-  Type _types;
-  Channel<Event::Type> _chan;
+  size_t _events = 0;
 };
-
-extern Event::Type operator|(Event::Type a, Event::Type b);
 
 class EventHandler {
  public:
   EventHandler(size_t fd_capacity);
   EventHandler(const EventHandler&) = delete;
   ~EventHandler();
-  void add(Fd fd, Event& on);
-  void mod(Fd fd, Event& on);
+  auto add(Fd fd, Event on) -> Channel<Event>;
+  void mod(Fd fd, Event on);
   void del(Fd fd);
   auto handle(size_t handle_batch = 128, size_t timeout_ms = 50) -> size_t;
 
-#if defined(linux) || defined(__linux) || defined(__linux__)
  private:
   Fd _handler_fd;
-#endif
+  SpinLock _mtx;
+  std::unordered_map<Fd, Channel<Event>> _fd_chan;
 };
 
 }  // namespace cgo::impl

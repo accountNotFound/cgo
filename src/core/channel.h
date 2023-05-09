@@ -26,6 +26,7 @@ class ChanImpl {
 template <NoVoid T>
 class Channel {
  public:
+  Channel() : _impl(std::make_shared<ChanImpl>(1)) {}
   Channel(size_t capacity) : _impl(std::make_shared<ChanImpl>(capacity)) {}
   auto send(T&& value) -> Async<void> { co_await this->_impl->send(std::make_any<T>(std::move(value))); }
   auto recv() -> Async<T> {

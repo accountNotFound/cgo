@@ -1,12 +1,7 @@
 #include "event.h"
 
-namespace cgo::impl {
-
-Event::Type operator|(Event::Type a, Event::Type b) {
-  return static_cast<Event::Type>(static_cast<size_t>(a) | static_cast<size_t>(b));
-}
-
-}  // namespace cgo::impl
+// #define USE_DEBUG
+#include "util/log.h"
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
 #include <sys/epoll.h>
@@ -15,53 +10,60 @@ Event::Type operator|(Event::Type a, Event::Type b) {
 
 namespace cgo::impl {
 
-auto Event::to_linux() const -> size_t {
-  size_t res = 0;
-  if (this->types() | Event::Type::IN) res |= EPOLLIN;
-  if (this->types() | Event::Type::OUT) res |= EPOLLOUT;
-  if (this->types() | Event::Type::ERR) res |= EPOLLERR;
-  if (this->types() | Event::Type::ONESHOT) res |= EPOLLONESHOT;
-  return res;
+auto Event::to_linux(Event cgo_event) -> size_t {
+  size_t linux_event = 0;
+  if (cgo_event & Event::IN) linux_event |= ::EPOLLIN;
+  if (cgo_event & Event::OUT) linux_event |= ::EPOLLOUT;
+  if (cgo_event & Event::ERR) linux_event |= ::EPOLLERR;
+  if (cgo_event & Event::ONESHOT) linux_event |= ::EPOLLONESHOT;
+  return linux_event;
 }
 
-auto Event::from_linux(size_t linux_event) const -> Event {
-  Event res = *this;
+auto Event::from_linux(size_t linux_event) -> Event {
   size_t cgo_event = 0;
-  if (linux_event & EPOLLIN) cgo_event |= Event::Type::IN;
-  if (linux_event & EPOLLOUT) cgo_event |= Event::Type::OUT;
-  if (linux_event & EPOLLERR) cgo_event |= Event::Type::ERR;
-  res._types = static_cast<Event::Type>(cgo_event);
-  return res;
+  if (linux_event & ::EPOLLIN) cgo_event |= Event::IN;
+  if (linux_event & ::EPOLLOUT) cgo_event |= Event::OUT;
+  if (linux_event & ::EPOLLERR) cgo_event |= Event::ERR;
+  if (linux_event & ::EPOLLONESHOT) cgo_event |= Event::ONESHOT;
+  return cgo_event;
 }
 
 EventHandler::EventHandler(size_t fd_capacity) { this->_handler_fd = ::epoll_create(fd_capacity); }
 
 EventHandler::~EventHandler() { ::close(this->_handler_fd); }
 
-auto EventHandler::add(Fd fd, Event& on) -> void {
+auto EventHandler::add(Fd fd, Event on) -> Channel<Event> {
   ::epoll_event ev;
-  ev.events = on.to_linux();
-  ev.data.ptr = &on;
+  std::unique_lock guard(this->_mtx);
+  this->_fd_chan[fd] = Channel<Event>();
+  ev.events = Event::to_linux(on) | ::EPOLLET;
+  ev.data.fd = fd;
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_ADD, fd, &ev);
+  return this->_fd_chan.at(fd);
 }
-auto EventHandler::mod(Fd fd, Event& on) -> void {
+
+void EventHandler::mod(Fd fd, Event on) {
   ::epoll_event ev;
-  ev.events = on.to_linux();
-  ev.data.ptr = &on;
+  ev.events = Event::to_linux(on);
+  ev.data.fd = fd;
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_MOD, fd, &ev);
 }
+
 auto EventHandler::del(Fd fd) -> void {
+  std::unique_lock guard(this->_mtx);
+  this->_fd_chan.erase(fd);
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_DEL, fd, nullptr);
 }
+
 auto EventHandler::handle(size_t handle_batch, size_t timeout_ms) -> size_t {
   std::vector<::epoll_event> ev_buffer(handle_batch);
   size_t active_num = ::epoll_wait(this->_handler_fd, ev_buffer.data(), ev_buffer.size(), timeout_ms);
+
+  std::unique_lock guard(this->_mtx);
   for (int i = 0; i < active_num; i++) {
-    auto ev = static_cast<Event*>(ev_buffer[i].data.ptr);
-    auto ok = ev->chan().send_nowait(ev->from_linux(ev_buffer[i].events).types());
-    if (!ok) {
-      // TOOD: optimization
-      // current implementation works in LT mode default and data would not lost, simply send_nowait in next handle()
+    if (this->_fd_chan.contains(ev_buffer[i].data.fd)) {
+      auto& chan = this->_fd_chan.at(ev_buffer[i].data.fd);
+      chan.send_nowait(Event::from_linux(ev_buffer[i].events));
     }
   }
   return active_num;
