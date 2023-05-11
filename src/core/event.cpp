@@ -44,7 +44,7 @@ auto EventHandler::add(Fd fd, Event on) -> Channel<Event> {
 
 void EventHandler::mod(Fd fd, Event on) {
   ::epoll_event ev;
-  ev.events = Event::to_linux(on);
+  ev.events = Event::to_linux(on) | ::EPOLLET;
   ev.data.fd = fd;
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_MOD, fd, &ev);
 }
@@ -59,8 +59,8 @@ auto EventHandler::handle(size_t handle_batch, size_t timeout_ms) -> size_t {
   std::vector<::epoll_event> ev_buffer(handle_batch);
   size_t active_num = ::epoll_wait(this->_handler_fd, ev_buffer.data(), ev_buffer.size(), timeout_ms);
 
-  std::unique_lock guard(this->_mtx);
   for (int i = 0; i < active_num; i++) {
+    std::unique_lock guard(this->_mtx);
     if (this->_fd_chan.contains(ev_buffer[i].data.fd)) {
       auto& chan = this->_fd_chan.at(ev_buffer[i].data.fd);
       chan.send_nowait(Event::from_linux(ev_buffer[i].events));
