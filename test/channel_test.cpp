@@ -61,15 +61,14 @@ const size_t exec_num = 10;
 size_t foo_num = 1000, foo_loop = 1000;
 size_t end_num = 0;
 
-Context ctx;
 Mutex lock;
 
 Async<void> foo(std::string name) {
   DEBUG("%s start", name.data());
   Channel<std::string> outchan(foo_num);
   for (int i = 0; i < foo_loop; i++) {
-    // TODO: lambda capture fail
-    ctx.spawn([](Channel<std::string> outchan, int i) -> Async<void> {
+    // NOTE: do not use lambda capture here, same as reference
+    Context::current().spawn([](Channel<std::string> outchan, int i) -> Async<void> {
       DEBUG("spawn_%d start", i);
       outchan.send_nowait("hello");
       DEBUG("spawn_%d send %s", i, "hello");
@@ -88,6 +87,7 @@ Async<void> foo(std::string name) {
 }
 
 int test() {
+  Context ctx;
   ctx.start(exec_num);
   for (int i = 0; i < foo_num; i++) {
     std::string name = "foo_" + std::to_string(i);

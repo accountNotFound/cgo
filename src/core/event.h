@@ -1,6 +1,7 @@
 #pragma once
 
-#include <unordered_map>
+#include <functional>
+#include <map>
 
 #include "channel.h"
 
@@ -37,7 +38,7 @@ class EventHandler {
   EventHandler(size_t fd_capacity);
   EventHandler(const EventHandler&) = delete;
   ~EventHandler();
-  auto add(Fd fd, Event on) -> Channel<Event>;
+  void add(Fd fd, Event on, const std::function<void(Event)>& callback);
   void mod(Fd fd, Event on);
   void del(Fd fd);
   auto handle(size_t handle_batch = 128, size_t timeout_ms = 50) -> size_t;
@@ -45,7 +46,7 @@ class EventHandler {
  private:
   Fd _handler_fd;
   SpinLock _mtx;
-  std::unordered_map<Fd, Channel<Event>> _fd_chan;
+  std::map<Fd, std::function<void(Event)>> _fd_callback;
 };
 
 }  // namespace cgo::impl

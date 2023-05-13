@@ -32,14 +32,13 @@ EventHandler::EventHandler(size_t fd_capacity) { this->_handler_fd = ::epoll_cre
 
 EventHandler::~EventHandler() { ::close(this->_handler_fd); }
 
-auto EventHandler::add(Fd fd, Event on) -> Channel<Event> {
+void EventHandler::add(Fd fd, Event on, const std::function<void(Event)>& callback) {
   ::epoll_event ev;
   std::unique_lock guard(this->_mtx);
-  this->_fd_chan[fd] = Channel<Event>();
+  this->_fd_callback[fd] = callback;
   ev.events = Event::to_linux(on) | ::EPOLLET;
   ev.data.fd = fd;
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_ADD, fd, &ev);
-  return this->_fd_chan.at(fd);
 }
 
 void EventHandler::mod(Fd fd, Event on) {
@@ -51,7 +50,7 @@ void EventHandler::mod(Fd fd, Event on) {
 
 auto EventHandler::del(Fd fd) -> void {
   std::unique_lock guard(this->_mtx);
-  this->_fd_chan.erase(fd);
+  this->_fd_callback.erase(fd);
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_DEL, fd, nullptr);
 }
 
@@ -61,9 +60,8 @@ auto EventHandler::handle(size_t handle_batch, size_t timeout_ms) -> size_t {
 
   for (int i = 0; i < active_num; i++) {
     std::unique_lock guard(this->_mtx);
-    if (this->_fd_chan.contains(ev_buffer[i].data.fd)) {
-      auto& chan = this->_fd_chan.at(ev_buffer[i].data.fd);
-      chan.send_nowait(Event::from_linux(ev_buffer[i].events));
+    if (this->_fd_callback.contains(ev_buffer[i].data.fd)) {
+      this->_fd_callback.at(ev_buffer[i].data.fd)(ev_buffer[i].events);
     }
   }
   return active_num;

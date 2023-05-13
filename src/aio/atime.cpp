@@ -11,7 +11,8 @@ Timer::Timer(unsigned long long millisec) {
   ts.it_interval = timespec{0, 0};
   ts.it_value = timespec{(long)millisec / 1000, ((long)millisec % 1000) * 1000000};
   timerfd_settime(_fd, 0, &ts, nullptr);
-  this->_chan = Context::current().handler().add(this->_fd, Event::IN | Event::ONESHOT);
+  Context::current().handler().add(this->_fd, Event::IN | Event::ONESHOT,
+                                   [this](Event event) { this->_chan.send_nowait(std::move(event)); });
 }
 
 Timer::~Timer() {

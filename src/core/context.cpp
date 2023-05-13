@@ -47,8 +47,8 @@ thread_local Context* Context::_current_context = nullptr;
 thread_local Coroutine* Context::_running_coroutine = nullptr;
 
 Context::Context() {
-  if (Context::_current_context) {
-    // TODO: throw exception or exit
+  if (Context::_current_context != nullptr) {
+    throw "try to create new context in thread where another context already exists !!!";
   }
   Context::_current_context = this;
   this->_runnable_set = std::make_unique<RunnableSet>(this->_mutex);
