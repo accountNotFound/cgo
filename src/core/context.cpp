@@ -3,10 +3,15 @@
 #include <chrono>
 #include <queue>
 
+#include "event.h"
+
 // #define USE_DEBUG
 #include "util/log.h"
 
 namespace cgo::impl {
+
+const size_t ScheduleWaitingMilliSec = 50;
+const size_t EventHandlerFdCapacity = 1024;
 
 Coroutine::Coroutine(std::unique_ptr<AsyncTrait>&& func, const std::string& name)
     : _func(std::move(func)), _name(name != "" ? name : "co_" + std::to_string(size_t(this))) {}
@@ -42,11 +47,12 @@ thread_local Context* Context::_current_context = nullptr;
 thread_local Coroutine* Context::_running_coroutine = nullptr;
 
 Context::Context() {
-  if (Context::_current_context) {
-    // TODO: throw exception or exit
+  if (Context::_current_context != nullptr) {
+    throw "try to create new context in thread where another context already exists !!!";
   }
   Context::_current_context = this;
   this->_runnable_set = std::make_unique<RunnableSet>(this->_mutex);
+  this->_event_handler = std::make_unique<EventHandler>(EventHandlerFdCapacity);
 }
 
 Context::~Context() {
@@ -119,7 +125,7 @@ auto Context::_schedule_loop() -> void {
     auto coro_wrapper = this->_runnable_set->pop();
     if (!coro_wrapper.has_value()) {
       DEBUG("[TH-{%u}]: sleep", tid);
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      std::this_thread::sleep_for(std::chrono::milliseconds(ScheduleWaitingMilliSec));
       continue;
     }
     Context::_running_coroutine = &coro_wrapper.value();
@@ -134,10 +140,6 @@ auto Context::_schedule_loop() -> void {
     }
     DEBUG("[TH-{%u}]: execute end: coroutine{%s}", tid, name);
   }
-}
-
-auto Context::_event_loop() -> void {
-  // TODO
 }
 
 }  // namespace cgo::impl

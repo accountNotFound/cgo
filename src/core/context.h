@@ -40,6 +40,8 @@ class CoroutineSet {
   SpinLock _local_mutex = {};
 };
 
+class EventHandler;
+
 class Context {
  public:
   using Callback = std::function<void()>;
@@ -56,6 +58,7 @@ class Context {
   auto yield(const Callback& defer = nullptr) -> std::suspend_always;
   auto wait(CoroutineSet* block_set, const Callback& defer = nullptr) -> std::suspend_always;
   auto notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer = nullptr) -> void;
+  auto handler() -> EventHandler& { return *this->_event_handler; }
 
  public:
   template <typename T>
@@ -65,7 +68,6 @@ class Context {
 
  private:
   auto _schedule_loop() -> void;
-  auto _event_loop() -> void;
 
  private:
   static thread_local Context* _current_context;
@@ -75,6 +77,7 @@ class Context {
   SpinLock _mutex;
   std::unique_ptr<CoroutineSet> _runnable_set;
   std::vector<std::thread> _executors;
+  std::unique_ptr<EventHandler> _event_handler;
   bool _finish = false;
 };
 
