@@ -10,6 +10,17 @@
 
 namespace cgo::impl {
 
+auto Event::str() const -> const std::string {
+  std::string res = "(";
+  if (this->_events & Event::IN) res += "IN,";
+  if (this->_events & Event::OUT) res += "OUT,";
+  if (this->_events & Event::ERR) res += "ERR,";
+  if (this->_events & Event::ONESHOT) res += "ONESHOT,";
+  if (res.back() == ',') res.pop_back();
+  res.push_back(')');
+  return res;
+}
+
 auto Event::to_linux(Event cgo_event) -> size_t {
   size_t linux_event = 0;
   if (cgo_event & Event::IN) linux_event |= ::EPOLLIN;
@@ -61,6 +72,7 @@ auto EventHandler::handle(size_t handle_batch, size_t timeout_ms) -> size_t {
   for (int i = 0; i < active_num; i++) {
     std::unique_lock guard(this->_mtx);
     if (this->_fd_callback.contains(ev_buffer[i].data.fd)) {
+      DEBUG("fd=%u activate with %s", ev_buffer[i].data.fd, Event::from_linux(ev_buffer[i].events).str().data());
       this->_fd_callback.at(ev_buffer[i].data.fd)(ev_buffer[i].events);
     }
   }

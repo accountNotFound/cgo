@@ -20,6 +20,7 @@ class Event {
   Event() = default;
   Event(size_t events) : _events(events) {}
   operator size_t() { return this->_events; }
+  const std::string str() const;
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
 

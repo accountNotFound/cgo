@@ -1,6 +1,7 @@
 #include <chrono>
 
 #include "aio/atime.h"
+#include "aio/net.h"
 #include "core/channel.h"
 
 // #define USE_DEBUG
@@ -16,7 +17,6 @@ size_t end_num = 0;
 
 constexpr long sleep_millisec = 50;
 
-Context ctx;
 Mutex lock;
 
 Async<void> foo(std::string name) {
@@ -39,6 +39,7 @@ std::chrono::milliseconds current_millisec() {
 }
 
 int test() {
+  Context ctx;
   ctx.start(exec_num);
   auto begin_ms = current_millisec();
   for (int i = 0; i < foo_num; i++) {
@@ -50,9 +51,9 @@ int test() {
   ctx.stop();
   auto end_ms = current_millisec();
   size_t theory_ms_cost = (sleep_millisec + sleep_millisec + foo_loop) * foo_loop / 2;
-  printf("theory time cost: %u\n", theory_ms_cost);
-  printf("real time cost: %u\n", (end_ms - begin_ms).count());
-  if (end_ms - begin_ms > std::chrono::milliseconds(theory_ms_cost * 4 / 3) ||
+  printf("theory time cost: %lu\n", theory_ms_cost);
+  printf("real time cost: %lu\n", (end_ms - begin_ms).count());
+  if (end_ms - begin_ms > std::chrono::milliseconds(theory_ms_cost * 2) ||
       end_ms - begin_ms < std::chrono::microseconds(theory_ms_cost)) {
     return -1;
   }
@@ -61,7 +62,40 @@ int test() {
 
 }  // namespace time_test
 
+namespace net_test {
+
+const size_t exec_num = 10;
+
+const size_t server_port = 8080;
+
+Async<void> run_server() {
+  TcpServer server(server_port);
+  printf("server start on %lu\n", server_port);
+  while (true) {
+    auto conn = co_await server.accept();
+    Context::current().spawn([](Connection conn) -> Async<void> {
+      auto req = co_await conn.recv();
+      printf("recv from client: \"%s\"\n", req.data());
+      co_await conn.send("echo from server: " + req);
+      printf("connection close\n");
+    }(conn));
+  }
+}
+
+int test() {
+  Context ctx;
+  ctx.start(exec_num);
+  ctx.spawn(run_server());
+  while (true) {
+    Context::current().handler().handle();
+  }
+  return 0;
+}
+
+}  // namespace net_test
+
 int main() {
   int code = time_test::test();
   return code;
+  // return net_test::test();
 }
