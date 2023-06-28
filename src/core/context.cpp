@@ -10,7 +10,7 @@
 
 namespace cgo::impl {
 
-const size_t ScheduleWaitingMilliSec = 50;
+const size_t ScheduleWaitingMilliSec = 10;
 const size_t EventHandlerFdCapacity = 1024;
 
 Coroutine::Coroutine(std::unique_ptr<AsyncTrait>&& func, const std::string& name)

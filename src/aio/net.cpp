@@ -1,6 +1,6 @@
 #include "net.h"
 
-#define USE_DEBUG
+// #define USE_DEBUG
 #include "util/log.h"
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
@@ -71,7 +71,7 @@ auto TcpServer::accept() -> Async<Connection> {
 class Connection::Impl {
  public:
   Impl(Fd fd) : _fd(fd) {
-    Context::current().handler().add(this->_fd, this->_ev_listening, [this](Event ev_activate) {
+    Context::current().handler().add(this->_fd, Event::IN, [this](Event ev_activate) {
       if (ev_activate & Event::IN) {
         this->_chan_in.send_nowait(std::move(ev_activate));
       } else if (ev_activate & Event::OUT) {
@@ -88,7 +88,6 @@ class Connection::Impl {
     DEBUG("tcp connection fd=%lu closed", this->_fd);
   }
   auto recv() -> Async<std::string> {
-    co_await this->_chan_in.recv();
     std::string res;
     while (true) {
       std::string buffer(BufferSize, '\0');
@@ -96,12 +95,15 @@ class Connection::Impl {
       DEBUG("copnnection fd=%lu get %d bytes", this->_fd, nbytes);
       if (nbytes <= 0) {
         // TODO: error handle if nbytes==-1
-        break;
+        if (res.size() > 0) {
+          break;
+        } else {
+          co_await this->_chan_in.recv();
+        }
       } else {
         res += std::move(buffer);
       }
     }
-    Context::current().handler().mod(this->_fd, this->_ev_listening);
     co_return std::move(res);
   }
   auto send(const std::string& data) -> Async<void> {
@@ -110,10 +112,9 @@ class Connection::Impl {
       DEBUG("connection fd=%lu send %d bytes", this->_fd, nbytes);
       if (nbytes <= 0) {
         // TODO: error handle if nbytes==-1
-        this->_ev_listening = Event::IN | Event::OUT | Event::ONESHOT;
-        Context::current().handler().mod(this->_fd, this->_ev_listening);
+        Context::current().handler().mod(this->_fd, Event::IN & Event::OUT & Event::ONESHOT);
         co_await this->_chan_out.recv();
-        this->_ev_listening = Event::IN | Event::ONESHOT;
+        Context::current().handler().mod(this->_fd, Event::IN);
       }
     }
   }
@@ -122,7 +123,6 @@ class Connection::Impl {
   Fd _fd;
   Channel<Event> _chan_in;
   Channel<Event> _chan_out;
-  Event _ev_listening = Event::IN | Event::ONESHOT;
 };
 
 Connection::Connection(Fd fd) : _impl(std::make_shared<Connection::Impl>(fd)) {}
@@ -135,7 +135,7 @@ auto Connection::send(const std::string& data) -> Async<void> { co_await this->_
 
 TcpClient::TcpClient(const std::string& host, size_t port) {
   this->_svr_addr.sin_family = AF_INET;
-  this->_svr_addr.sin_addr.s_addr = ::htonl(INADDR_ANY);
+  this->_svr_addr.sin_addr.s_addr = ::inet_addr(host.data());
   this->_svr_addr.sin_port = ::htons(port);
 }
 
@@ -144,9 +144,24 @@ TcpClient::~TcpClient() = default;
 auto TcpClient::connect() -> Async<Connection> {
   // TODO: error handle
   Fd conn_fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  set_fd_nonblock(conn_fd);
-  ::connect(conn_fd, (::sockaddr*)(&this->_svr_addr), sizeof(this->_svr_addr));
-
+  if (int(conn_fd) < 0) {
+    exit(1);
+  }
+  if (set_fd_nonblock(conn_fd) < 0) {
+    exit(1);
+  }
+  while (true) {
+    if (::connect(conn_fd, (::sockaddr*)(&this->_svr_addr), sizeof(this->_svr_addr)) < 0) {
+      // DEBUG("tcp client connect failed, conn_fd=%u, errno=%d", conn_fd, errno);
+      // TODO: error handle
+      Context::current().handler().add(conn_fd, Event::OUT | Event::ONESHOT,
+                                       [this](Event event) { this->_chan.send_nowait(std::move(event)); });
+      co_await this->_chan.recv();
+      Context::current().handler().del(conn_fd);
+    } else {
+      break;
+    }
+  }
   co_return Connection(conn_fd);
 }
 

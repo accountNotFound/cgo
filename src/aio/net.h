@@ -44,4 +44,22 @@ class TcpServer {
 #endif
 };
 
+class TcpClient {
+ public:
+  TcpClient(const std::string& host, size_t port);
+  TcpClient(const TcpClient&) = delete;
+  ~TcpClient();
+  auto connect() -> Async<Connection>;
+
+ private:
+  Channel<Event> _chan;
+
+#if defined(linux) || defined(__linux) || defined(__linux__)
+
+ private:
+  ::sockaddr_in _svr_addr;
+
+#endif
+};
+
 }  // namespace cgo::impl

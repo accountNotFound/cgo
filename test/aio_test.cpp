@@ -68,6 +68,11 @@ const size_t exec_num = 10;
 
 const size_t server_port = 8080;
 
+size_t client_num = 10, connection_num = 100;
+
+Mutex mtx;
+size_t client_end = 0;
+
 Async<void> run_server() {
   TcpServer server(server_port);
   printf("server start on %lu\n", server_port);
@@ -82,12 +87,32 @@ Async<void> run_server() {
   }
 }
 
+Async<void> run_client(int cli_id) {
+  co_await cgo::impl::sleep(500);  // wait server start
+  std::string req = "req from client ";
+  TcpClient client("0.0.0.0", server_port);
+  printf("tcp client created\n");
+  for (int i = 0; i < connection_num; i++) {
+    auto conn = co_await client.connect();
+    co_await conn.send(req + std::to_string(cli_id) + ", data: " + std::to_string(i));
+    // printf("send \"%s%d\" to server\n", req.data(), i);
+    auto rsp = co_await conn.recv();
+    printf("recv from server: \"%s\"\n", rsp.data());
+  }
+  co_await mtx.lock();
+  client_end++;
+  mtx.unlock();
+}
+
 int test() {
   Context ctx;
   ctx.start(exec_num);
-  ctx.spawn(run_server());
-  while (true) {
-    Context::current().handler().handle();
+  // ctx.spawn(run_server());
+  for (int i = 0; i < client_num; i++) {
+    ctx.spawn(run_client(i));
+  }
+  while (client_end < client_num) {
+    Context::current().handler().handle(128, 0);
   }
   return 0;
 }
@@ -95,7 +120,7 @@ int test() {
 }  // namespace net_test
 
 int main() {
-  int code = time_test::test();
-  return code;
-  // return net_test::test();
+  // int code = time_test::test();
+  // return code;
+  return net_test::test();
 }

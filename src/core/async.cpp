@@ -6,7 +6,7 @@
 namespace cgo::impl {
 
 AsyncTrait::AsyncTrait(AsyncTrait&& rhs) {
-  DEBUG("move: this=%p, from=%p\n", this, &rhs);
+  DEBUG("move: this=%p, from=%p", this, &rhs);
   this->_handler = rhs._handler;
   this->_promise = rhs._promise;
   this->_stack = rhs._stack;
@@ -17,15 +17,16 @@ AsyncTrait::AsyncTrait(AsyncTrait&& rhs) {
 }
 
 AsyncTrait::~AsyncTrait() {
-  if (this->_handler && !this->_handler.done()) {
+  if (this->_handler) {
     this->_handler.destroy();
   }
+  DEBUG("destroy: this=%p", this);
 }
 
 auto AsyncTrait::start() -> void {
   this->_stack = std::make_shared<std::stack<HandlerTrait>>();
   this->_stack->push(this->_handler);
-  DEBUG("start: this=%p, stack=%p\n", this, this->_stack.get());
+  DEBUG("start: this=%p, stack=%p", this, this->_stack.get());
 }
 
 auto AsyncTrait::resume() -> void {
@@ -38,7 +39,7 @@ auto AsyncTrait::resume() -> void {
 auto AsyncTrait::done() const -> bool { return this->_handler.done(); }
 
 auto AsyncTrait::call(AsyncTrait& callee) -> void {
-  DEBUG("call: this=%p, callee=%p, stack=%p\n", this, &callee, this->_stack.get());
+  DEBUG("call: this=%p, callee=%p, stack=%p", this, &callee, this->_stack.get());
   this->_stack->push(callee._handler);
   callee._stack = this->_stack;
 }
