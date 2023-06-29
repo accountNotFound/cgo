@@ -48,6 +48,7 @@ TcpServer::TcpServer(size_t port) {
 TcpServer::~TcpServer() {
   Context::current().handler().del(this->_fd);
   ::close(this->_fd);
+  DEBUG("server fd=%u closed", this->_fd);
 }
 
 auto TcpServer::accept() -> Async<Connection> {
