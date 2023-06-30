@@ -33,6 +33,10 @@ TcpServer::TcpServer(size_t port) {
   if (set_fd_nonblock(this->_fd) < 0) {
     exit(1);
   }
+  int optval = 1;
+  if (::setsockopt(this->_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+    exit(1);
+  }
   if (::bind(this->_fd, (::sockaddr*)(&this->_svr_addr), sizeof(this->_svr_addr)) < 0) {
     exit(1);
   }
