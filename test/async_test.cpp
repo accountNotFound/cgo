@@ -9,6 +9,10 @@ using namespace cgo::impl;
 Async<int> bar(int n) {
   int res = 0;
   for (int i = 0; i < n; i++) {
+    if (i > 5) {
+      printf("  bar throw exception\n");
+      throw n;
+    }
     printf("   bar %d\n", i);
     co_await std::suspend_always{};
     res += i + 1;
@@ -17,10 +21,20 @@ Async<int> bar(int n) {
 }
 
 Async<std::any> foo(int n) {
+  bool has_err = false;
   std::string res = "";
   for (int i = 0; i < n; i++) {
     printf("  foo %d\n", i);
-    res += std::to_string(co_await bar(i)) + " ";
+    try {
+      res += std::to_string(co_await bar(i)) + " ";
+    } catch (int n) {
+      printf(" foo catch err from bar: '%d'\n", n);
+      has_err = true;
+    }
+  }
+  if (has_err) {
+    printf(" foo rethrow exception\n");
+    throw "foo rethrow";
   }
   co_return std::move(res);
 }
@@ -36,8 +50,12 @@ Async<void> biz() {
 int main() {
   auto e = biz();
   printf("coroutine test start\n");
-  for (e.start(); !e.done(); e.resume()) {
-    printf("main\n");
+  try {
+    for (e.start(); !e.done(); e.resume()) {
+      printf("main\n");
+    }
+  } catch (const char* e) {
+    printf("main catch: '%s'\n", e);
   }
   printf("coroutine test end\n");
 }
