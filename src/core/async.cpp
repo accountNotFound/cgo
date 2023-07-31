@@ -23,23 +23,38 @@ AsyncTrait::~AsyncTrait() {
 }
 
 auto AsyncTrait::start() -> void {
-  this->_stack = std::make_shared<std::stack<HandlerTrait>>();
-  this->_stack->push(this->_handler);
+  this->_stack = std::make_shared<std::stack<AsyncTrait*>>();
+  this->_stack->push(this);
   DEBUG("start: this=%p, stack=%p\n", this, this->_stack.get());
 }
 
 auto AsyncTrait::resume() -> void {
-  while (!this->_stack->empty() && this->_stack->top().done()) {
-    this->_stack->pop();
+  while (!this->_stack->empty()) {
+    if (this->_stack->top()->_handler.done()) {
+      this->_stack->pop();
+      continue;
+    }
+    if (this->_stack->top()->_promise->exception()) {
+      auto e = this->_stack->top()->_promise->exception();
+      this->_stack->pop();
+      this->_stack->top()->_promise->set_exception(e);
+    }
+    break;
   }
-  this->_stack->top().resume();
+  if (!this->_stack->empty()) {
+    auto cur = this->_stack->top();
+    cur->_handler.resume();
+    if (cur == this && cur->_promise->exception()) {
+      std::rethrow_exception(cur->_promise->exception());
+    }
+  }
 }
 
 auto AsyncTrait::done() const -> bool { return this->_handler.done(); }
 
 auto AsyncTrait::call(AsyncTrait& callee) -> void {
   DEBUG("call: this=%p, callee=%p, stack=%p\n", this, &callee, this->_stack.get());
-  this->_stack->push(callee._handler);
+  this->_stack->push(&callee);
   callee._stack = this->_stack;
 }
 

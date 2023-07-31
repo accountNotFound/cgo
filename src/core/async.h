@@ -20,8 +20,11 @@ class PromiseTrait {
   auto initial_suspend() const -> std::suspend_always { return std::suspend_always{}; }
   auto final_suspend() const noexcept -> std::suspend_always { return std::suspend_always{}; }
   auto unhandled_exception() noexcept -> void { this->_error = std::current_exception(); }
+
   auto set_wrapper(AsyncTrait& wrapper) -> void { this->_wrapper = &wrapper; }
   auto wrapper() -> AsyncTrait& { return *this->_wrapper; }
+  void set_exception(const std::exception_ptr& e) { this->_error = e; }
+  auto exception() -> std::exception_ptr { return this->_error; }
 
  public:
   template <NoVoid T>
@@ -80,7 +83,7 @@ class AsyncTrait {
  protected:
   HandlerTrait _handler;
   PromiseTrait* _promise;
-  std::shared_ptr<std::stack<HandlerTrait>> _stack;
+  std::shared_ptr<std::stack<AsyncTrait*>> _stack;
 };
 
 template <typename T>
@@ -102,6 +105,9 @@ class Async : public AsyncTrait {
 
  public:
   auto await_resume() -> T {
+    if (this->_promise->exception()) {
+      std::rethrow_exception(this->_promise->exception());
+    }
     if constexpr (!std::is_same_v<T, void>) {
       return this->_promise->get<T>();
     }
