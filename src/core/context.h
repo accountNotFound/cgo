@@ -14,8 +14,8 @@ namespace cgo::impl {
 class Coroutine {
  public:
   Coroutine(std::unique_ptr<AsyncTrait>&& func, const std::string& name = "");
-  auto start() -> void { this->_func->start(); }
-  auto resume() -> void { this->_func->resume(); }
+  void start() { this->_func->start(); }
+  void resume() { this->_func->resume(); }
   auto done() const -> bool { return this->_func->done(); }
   auto name() const -> const std::string& { return this->_name; }
 
@@ -28,11 +28,11 @@ class CoroutineSet {
  public:
   CoroutineSet() { this->_mutex = &this->_local_mutex; }
   CoroutineSet(SpinLock& mutex) : _mutex(&mutex) {}
-  auto lock() -> void { this->_mutex->lock(); }
-  auto unlock() -> void { this->_mutex->unlock(); }
-  auto push(Coroutine&& coroutine) -> void;
+  auto lock() { this->_mutex->lock(); }
+  auto unlock() { this->_mutex->unlock(); }
+  auto push(Coroutine&& coroutine);
   auto pop() -> std::optional<Coroutine>;
-  virtual auto push_nolock(Coroutine&& coroutine) -> void = 0;
+  virtual void push_nolock(Coroutine&& coroutine) = 0;
   virtual auto pop_nolock() -> std::optional<Coroutine> = 0;
 
  private:
@@ -52,22 +52,22 @@ class Context {
  public:
   Context();
   ~Context();
-  auto start(size_t executor_num) -> void;
-  auto stop() -> void;
-  auto spawn(std::unique_ptr<AsyncTrait>&& func, const std::string& name = "") -> void;
+  void start(size_t executor_num);
+  void stop();
+  void spawn(std::unique_ptr<AsyncTrait>&& func, const std::string& name = "");
   auto yield(const Callback& defer = nullptr) -> std::suspend_always;
   auto wait(CoroutineSet* block_set, const Callback& defer = nullptr) -> std::suspend_always;
-  auto notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer = nullptr) -> void;
+  void notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer = nullptr);
   auto handler() -> EventHandler& { return *this->_event_handler; }
 
  public:
   template <typename T>
-  auto spawn(Async<T>&& func, const std::string& name = "") -> void {
+  void spawn(Async<T>&& func, const std::string& name = "") {
     this->spawn(std::make_unique<Async<T>>(std::move(func)), name);
   }
 
  private:
-  auto _schedule_loop() -> void;
+  void _schedule_loop();
 
  private:
   static thread_local Context* _current_context;

@@ -19,9 +19,9 @@ class PromiseTrait {
  public:
   auto initial_suspend() const -> std::suspend_always { return std::suspend_always{}; }
   auto final_suspend() const noexcept -> std::suspend_always { return std::suspend_always{}; }
-  auto unhandled_exception() noexcept -> void { this->_error = std::current_exception(); }
+  void unhandled_exception() noexcept { this->_error = std::current_exception(); }
 
-  auto set_wrapper(AsyncTrait& wrapper) -> void { this->_wrapper = &wrapper; }
+  void set_wrapper(AsyncTrait& wrapper) { this->_wrapper = &wrapper; }
   auto wrapper() -> AsyncTrait& { return *this->_wrapper; }
   void set_exception(const std::exception_ptr& e) { this->_error = e; }
   auto exception() -> std::exception_ptr { return this->_error; }
@@ -52,14 +52,14 @@ class PromiseTrait {
 template <typename T>
 class Promise : public PromiseTrait {
  public:
-  auto yield_value(T&& value) -> void { this->_yield_any(std::move(value)); }
-  auto return_value(T&& value) -> void { this->_yield_any(std::move(value)); }
+  void yield_value(T&& value) { this->_yield_any(std::move(value)); }
+  void return_value(T&& value) { this->_yield_any(std::move(value)); }
 };
 
 template <>
 class Promise<void> : public PromiseTrait {
  public:
-  auto return_void() const -> void {}
+  void return_void() const {}
 };
 
 class AsyncTrait {
@@ -67,10 +67,10 @@ class AsyncTrait {
   AsyncTrait(const AsyncTrait&) = delete;
   AsyncTrait(AsyncTrait&&);
   ~AsyncTrait();
-  auto start() -> void;
-  auto resume() -> void;
+  void start();
+  void resume();
   auto done() const -> bool;
-  auto call(AsyncTrait& callee) -> void;
+  void call(AsyncTrait& callee);
 
  protected:
   template <typename P>
@@ -99,7 +99,7 @@ class Async : public AsyncTrait {
  public:
   template <typename P>
     requires std::is_base_of_v<PromiseTrait, P>
-  auto await_suspend(std::coroutine_handle<P> caller) -> void {
+  void await_suspend(std::coroutine_handle<P> caller) {
     caller.promise().wrapper().call(*this);
   }
 

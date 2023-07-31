@@ -48,7 +48,7 @@ void EventHandler::mod(Fd fd, Event on) {
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_MOD, fd, &ev);
 }
 
-auto EventHandler::del(Fd fd) -> void {
+void EventHandler::del(Fd fd) {
   std::unique_lock guard(this->_mtx);
   this->_fd_callback.erase(fd);
   ::epoll_ctl(this->_handler_fd, EPOLL_CTL_DEL, fd, nullptr);

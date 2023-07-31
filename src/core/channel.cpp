@@ -8,7 +8,7 @@ namespace cgo::impl {
 class BlockSet : public CoroutineSet {
  public:
   BlockSet() : CoroutineSet() {}
-  auto push_nolock(Coroutine&& coroutine) -> void { _queue.push(std::move(coroutine)); }
+  void push_nolock(Coroutine&& coroutine) { _queue.push(std::move(coroutine)); }
   auto pop_nolock() -> std::optional<Coroutine> {
     if (_queue.size() == 0) {
       return std::nullopt;
@@ -100,7 +100,7 @@ class Mutex::Impl {
       }
     }
   }
-  auto unlock() -> void {
+  void unlock() {
     std::unique_lock guard(this->_mutex);
     this->_lock_flag = false;
     Context::current().notify({this->_block_set.get()});
@@ -116,6 +116,6 @@ Mutex::Mutex() : _impl(std::make_shared<Impl>()) {}
 
 auto Mutex::lock() -> Async<void> { co_await this->_impl->lock(); }
 
-auto Mutex::unlock() -> void { this->_impl->unlock(); }
+void Mutex::unlock() { this->_impl->unlock(); }
 
 }  // namespace cgo::impl

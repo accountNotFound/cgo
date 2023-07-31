@@ -22,13 +22,13 @@ AsyncTrait::~AsyncTrait() {
   }
 }
 
-auto AsyncTrait::start() -> void {
+void AsyncTrait::start() {
   this->_stack = std::make_shared<std::stack<AsyncTrait*>>();
   this->_stack->push(this);
   DEBUG("start: this=%p, stack=%p\n", this, this->_stack.get());
 }
 
-auto AsyncTrait::resume() -> void {
+void AsyncTrait::resume() {
   while (!this->_stack->empty()) {
     if (this->_stack->top()->_handler.done()) {
       this->_stack->pop();
@@ -52,7 +52,7 @@ auto AsyncTrait::resume() -> void {
 
 auto AsyncTrait::done() const -> bool { return this->_handler.done(); }
 
-auto AsyncTrait::call(AsyncTrait& callee) -> void {
+void AsyncTrait::call(AsyncTrait& callee) {
   DEBUG("call: this=%p, callee=%p, stack=%p\n", this, &callee, this->_stack.get());
   this->_stack->push(&callee);
   callee._stack = this->_stack;

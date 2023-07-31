@@ -57,7 +57,7 @@ class Mutex {
  public:
   Mutex();
   auto lock() -> Async<void>;
-  auto unlock() -> void;
+  void unlock();
 
  private:
   class Impl;
