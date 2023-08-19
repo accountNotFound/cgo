@@ -81,7 +81,7 @@ void Context::spawn(std::unique_ptr<AsyncTrait>&& func, const std::string& name)
   this->_runnable_set->push(std::move(coro));
 }
 
-auto Context::yield(const Callback& defer) -> std::suspend_always {
+auto Context::yield(const std::function<void()>& defer) -> std::suspend_always {
   auto tid = std::this_thread::get_id();
   DEBUG("[TH-{%u}]: yield coroutine{%s}", tid, Context::_running_coroutine->name().data());
   this->_runnable_set->push(std::move(*Context::_running_coroutine));
@@ -92,7 +92,7 @@ auto Context::yield(const Callback& defer) -> std::suspend_always {
   return std::suspend_always{};
 }
 
-auto Context::wait(CoroutineSet* block_set, const Callback& defer) -> std::suspend_always {
+auto Context::wait(CoroutineSet* block_set, const std::function<void()>& defer) -> std::suspend_always {
   auto tid = std::this_thread::get_id();
   DEBUG("[TH-{%u}]: suspend coroutine{%s}", tid, Context::_running_coroutine->name().data());
   block_set->push(std::move(*Context::_running_coroutine));
@@ -103,7 +103,7 @@ auto Context::wait(CoroutineSet* block_set, const Callback& defer) -> std::suspe
   return std::suspend_always{};
 }
 
-void Context::notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer) {
+void Context::notify(const std::vector<CoroutineSet*>& block_sets, const std::function<void()>& defer) {
   auto tid = std::this_thread::get_id();
   for (auto& set : block_sets) {
     auto coro_wrapper = set->pop();

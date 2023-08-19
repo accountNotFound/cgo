@@ -44,9 +44,6 @@ class EventHandler;
 
 class Context {
  public:
-  using Callback = std::function<void()>;
-
- public:
   static auto current() -> Context& { return *Context::_current_context; }
 
  public:
@@ -55,9 +52,9 @@ class Context {
   void start(size_t executor_num);
   void stop();
   void spawn(std::unique_ptr<AsyncTrait>&& func, const std::string& name = "");
-  auto yield(const Callback& defer = nullptr) -> std::suspend_always;
-  auto wait(CoroutineSet* block_set, const Callback& defer = nullptr) -> std::suspend_always;
-  void notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer = nullptr);
+  auto yield(const std::function<void()>& defer = nullptr) -> std::suspend_always;
+  auto wait(CoroutineSet* block_set, const std::function<void()>& defer = nullptr) -> std::suspend_always;
+  void notify(const std::vector<CoroutineSet*>& block_sets, const std::function<void()>& defer = nullptr);
   auto handler() -> EventHandler& { return *this->_event_handler; }
 
  public:
