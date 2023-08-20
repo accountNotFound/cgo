@@ -10,7 +10,8 @@
 
 namespace cgo::impl {
 
-const size_t ScheduleWaitingMilliSec = 50;
+const size_t SchedulerBaseWaitMilliSec = 5;
+const size_t ScheduleMaxWaitMilliSec = 50;
 const size_t EventHandlerFdCapacity = 1024;
 
 Coroutine::Coroutine(std::unique_ptr<AsyncTrait>&& func, const std::string& name)
@@ -81,7 +82,7 @@ void Context::spawn(std::unique_ptr<AsyncTrait>&& func, const std::string& name)
   this->_runnable_set->push(std::move(coro));
 }
 
-auto Context::yield(const Callback& defer) -> std::suspend_always {
+auto Context::yield(const std::function<void()>& defer) -> std::suspend_always {
   auto tid = std::this_thread::get_id();
   DEBUG("[TH-{%u}]: yield coroutine{%s}", tid, Context::_running_coroutine->name().data());
   this->_runnable_set->push(std::move(*Context::_running_coroutine));
@@ -92,7 +93,7 @@ auto Context::yield(const Callback& defer) -> std::suspend_always {
   return std::suspend_always{};
 }
 
-auto Context::wait(CoroutineSet* block_set, const Callback& defer) -> std::suspend_always {
+auto Context::wait(CoroutineSet* block_set, const std::function<void()>& defer) -> std::suspend_always {
   auto tid = std::this_thread::get_id();
   DEBUG("[TH-{%u}]: suspend coroutine{%s}", tid, Context::_running_coroutine->name().data());
   block_set->push(std::move(*Context::_running_coroutine));
@@ -103,7 +104,7 @@ auto Context::wait(CoroutineSet* block_set, const Callback& defer) -> std::suspe
   return std::suspend_always{};
 }
 
-void Context::notify(const std::vector<CoroutineSet*>& block_sets, const Callback& defer) {
+void Context::notify(const std::vector<CoroutineSet*>& block_sets, const std::function<void()>& defer) {
   auto tid = std::this_thread::get_id();
   for (auto& set : block_sets) {
     auto coro_wrapper = set->pop();
@@ -120,14 +121,18 @@ void Context::notify(const std::vector<CoroutineSet*>& block_sets, const Callbac
 void Context::_schedule_loop() {
   auto tid = std::this_thread::get_id();
   Context::_current_context = this;
+  size_t wait_millisec = SchedulerBaseWaitMilliSec;
   while (!this->_finish) {
     DEBUG("[TH-{%u}]: continue", tid);
     auto coro_wrapper = this->_runnable_set->pop();
     if (!coro_wrapper.has_value()) {
       DEBUG("[TH-{%u}]: sleep", tid);
-      std::this_thread::sleep_for(std::chrono::milliseconds(ScheduleWaitingMilliSec));
+      std::this_thread::sleep_for(std::chrono::milliseconds(wait_millisec));
+      wait_millisec += SchedulerBaseWaitMilliSec;
+      wait_millisec = std::min(wait_millisec, ScheduleMaxWaitMilliSec);
       continue;
     }
+    wait_millisec = SchedulerBaseWaitMilliSec;
     Context::_running_coroutine = &coro_wrapper.value();
     auto name = Context::_running_coroutine->name().data();
     DEBUG("[TH-{%u}]: execute start: coroutine{%s}", tid, name);
