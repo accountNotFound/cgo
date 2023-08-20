@@ -9,7 +9,7 @@
 
 namespace cgo::impl {
 
-class AioException {
+class AioException: public std::exception {
  public:
   AioException(const std::string& msg) : _msg(msg), _code(errno) {}
   const char* what() const noexcept { return format("[errno=%d] %s", this->_code, this->_msg.data()).data(); }

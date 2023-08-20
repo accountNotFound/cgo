@@ -38,7 +38,7 @@ class EventHandler {
   EventHandler(size_t fd_capacity);
   EventHandler(const EventHandler&) = delete;
   ~EventHandler();
-  void add(Fd fd, Event on, const std::function<void(Event)>& callback);
+  void add(Fd fd, Event on, Channel<Event>& chan);
   void mod(Fd fd, Event on);
   void del(Fd fd);
   auto handle(size_t handle_batch = 128, size_t timeout_ms = 50) -> size_t;
@@ -46,7 +46,7 @@ class EventHandler {
  private:
   Fd _handler_fd;
   SpinLock _mtx;
-  std::map<Fd, std::function<void(Event)>> _fd_callback;
+  std::unordered_map<Fd, Channel<Event>> _fd_chans;
 };
 
 }  // namespace cgo::impl

@@ -7,18 +7,19 @@
 
 namespace cgo::impl {
 template <typename... Args>
-inline std::string format(const char* format, Args... args) {
+std::string format(const char* fmt, Args... args) {
   constexpr size_t oldlen = BUFSIZ;
-  char buffer[oldlen];
+  std::string buffer(oldlen, '\0');
 
-  size_t newlen = snprintf(&buffer[0], oldlen, format, args...);
+  size_t newlen = snprintf(buffer.data(), oldlen, fmt, args...);
   newlen++;
 
   if (newlen > oldlen) {
-    std::vector<char> newbuffer(newlen);
-    snprintf(newbuffer.data(), newlen, format, args...);
-    return std::string(newbuffer.data());
+    std::string newbuffer(newlen, '\0');
+    snprintf(newbuffer.data(), newlen, fmt, args...);
+    return newbuffer;
   }
+  buffer.resize(newlen);
   return buffer;
 }
 }  // namespace cgo::impl

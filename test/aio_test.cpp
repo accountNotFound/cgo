@@ -10,7 +10,7 @@ using namespace cgo::impl;
 
 namespace time_test {
 
-const size_t exec_num = 10;
+const size_t exec_num = 4;
 size_t foo_num = 3000, foo_loop = 100;
 size_t end_num = 0;
 
