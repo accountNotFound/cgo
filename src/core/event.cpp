@@ -69,7 +69,7 @@ auto EventHandler::handle(size_t handle_batch, size_t timeout_ms) -> size_t {
     }
     std::unique_lock guard(_mtx);
     if (this->_fd_chans.contains(fd)) {
-      DEBUG("fd=%d get cgo_event=%d", fd, cgo_ev);
+      DEBUG("fd=%d get cgo_event=0x%x, linux_event=0x%x", fd, cgo_ev, ev_buffer[i].events);
       this->_fd_chans.at(fd).send_nowait(std::move(cgo_ev));
     }
   }

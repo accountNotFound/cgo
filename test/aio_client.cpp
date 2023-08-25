@@ -1,6 +1,7 @@
 #include <chrono>
 
 #include "aio/socket.h"
+#include "aio/error.h"
 
 // #define USE_DEBUG
 #include "util/format.h"
@@ -9,7 +10,7 @@
 using namespace cgo::impl;
 
 const size_t exec_num = 4;
-const size_t cli_num = 10, conn_num = 10;
+const size_t cli_num = 100, conn_num = 100;
 
 Mutex mtx;
 int end_num = 0;
