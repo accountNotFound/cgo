@@ -27,10 +27,10 @@ Socket::Socket() : Socket(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) {}
 
 Socket::Socket(Fd fd) : _fd(fd), _chan(1) {
   if (int(this->_fd) < 0) {
-    throw AioException(format("socket{fd=%d} create fail", this->_fd));
+    throw AioException(FORMAT("socket{fd=%d} create fail", this->_fd));
   }
   if (set_fd_nonblock(this->_fd) < 0) {
-    throw AioException(format("socket{fd=%d} create set nonblock fail", this->_fd));
+    throw AioException(FORMAT("socket{fd=%d} create set nonblock fail", this->_fd));
   }
   Context::current().handler().add(this->_fd, 0, this->_chan);
   DEBUG("socket{fd=%d} created", this->_fd);
@@ -47,13 +47,16 @@ auto Socket::recv(size_t size) -> Async<std::string> {
       res.resize(n);
       co_return std::move(res);
     }
+    if (n == 0) {
+      throw AioException(FORMAT("socket{fd=%d} close by other side", this->_fd));
+    }
     if (errno = EAGAIN) {
       Context::current().handler().mod(this->_fd, Event::IN | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR) {
-        throw AioException(format("socket{fd=%d} recv fail", this->_fd));
+      if ((co_await this->_chan.recv()) & Event::ERR && errno != EAGAIN) {
+        throw AioException(FORMAT("socket{fd=%d} recv fail", this->_fd));
       }
     } else {
-      throw AioException(format("socket{fd=%d} recv fail", this->_fd));
+      throw AioException(FORMAT("socket{fd=%d} recv fail", this->_fd));
     }
   }
 }
@@ -66,13 +69,16 @@ auto Socket::send(const std::string& data) -> Async<void> {
       i += n;
       continue;
     }
+    if (n == 0) {
+      throw AioException(FORMAT("socket{fd=%d} close by other side", this->_fd));
+    }
     if (errno = EAGAIN) {
       Context::current().handler().mod(this->_fd, Event::OUT | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR) {
-        throw AioException(format("socket{fd=%d} send fail", this->_fd));
+      if ((co_await this->_chan.recv()) & Event::ERR && errno != EAGAIN) {
+        throw AioException(FORMAT("socket{fd=%d} send fail", this->_fd));
       }
     } else {
-      throw AioException(format("socket{fd=%d} send fail", this->_fd));
+      throw AioException(FORMAT("socket{fd=%d} send fail", this->_fd));
     }
   }
 }
@@ -84,16 +90,16 @@ void Socket::bind(size_t port) {
   saddr.sin_addr.s_addr = INADDR_ANY;  // 0 = 0.0.0.0
   int optval = 1;
   if (::setsockopt(this->_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
-    throw AioException(format("socket{fd=%d} set addr reuse fail", this->_fd));
+    throw AioException(FORMAT("socket{fd=%d} set addr reuse fail", this->_fd));
   }
   if (::bind(this->_fd, (struct ::sockaddr*)&saddr, sizeof(saddr)) < 0) {
-    throw AioException(format("socket{fd=%d} bind addr fail", this->_fd));
+    throw AioException(FORMAT("socket{fd=%d} bind addr fail", this->_fd));
   }
 }
 
 void Socket::listen(size_t backlog) {
   if (::listen(this->_fd, backlog) < 0) {
-    throw AioException(format("socket{fd=%d} listen fail", this->_fd));
+    throw AioException(FORMAT("socket{fd=%d} listen fail", this->_fd));
   }
 }
 
@@ -108,11 +114,11 @@ auto Socket::accept() -> Async<Socket> {
     }
     if (errno == EAGAIN) {
       Context::current().handler().mod(this->_fd, Event::IN | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR) {
-        throw AioException(format("socket{fd=%d} accept fail", this->_fd));
+      if ((co_await this->_chan.recv()) & Event::ERR && errno != EAGAIN) {
+        throw AioException(FORMAT("socket{fd=%d} accept fail", this->_fd));
       }
     } else {
-      throw AioException(format("socket{fd=%d} accept fail", this->_fd));
+      throw AioException(FORMAT("socket{fd=%d} accept fail", this->_fd));
     }
   }
 }
@@ -123,24 +129,24 @@ auto Socket::connect(const char* ip, size_t port) -> Async<void> {
   saddr.sin_port = htons(port);
   inet_pton(AF_INET, ip, &saddr.sin_addr.s_addr);
   while (true) {
-    if (::connect(this->_fd, (::sockaddr*)&saddr, sizeof(saddr))) {
+    if (::connect(this->_fd, (::sockaddr*)&saddr, sizeof(saddr)) == 0) {
       DEBUG("socket{fd=%d} connect to %s:%d", this->_fd, ip, port);
       co_return;
     }
     if (errno == EINPROGRESS) {
       DEBUG("socket{fd=%d} connect inprogres", this->_fd);
       Context::current().handler().mod(this->_fd, Event::OUT | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR) {
-        throw AioException(format("socket{fd=%d} connect fail", this->_fd));
+      if ((co_await this->_chan.recv()) & Event::ERR && errno != EINPROGRESS && errno != EAGAIN) {
+        throw AioException(FORMAT("socket{fd=%d} connect fail", this->_fd));
       }
       int conn_status = 0;
       ::socklen_t len = sizeof(conn_status);
       if (::getsockopt(this->_fd, SOL_SOCKET, SO_ERROR, &conn_status, &len) < 0 || conn_status != 0) {
-        throw AioException(format("socket{fd=%d} connect fail", this->_fd));
+        throw AioException(FORMAT("socket{fd=%d} connect fail", this->_fd));
       }
-
+      co_return;
     } else {
-      throw AioException(format("socket{fd=%d} connect fail", this->_fd));
+      throw AioException(FORMAT("socket{fd=%d} connect fail", this->_fd));
     }
   }
 }

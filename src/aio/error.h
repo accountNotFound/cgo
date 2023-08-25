@@ -9,10 +9,10 @@
 
 namespace cgo::impl {
 
-class AioException: public std::exception {
+class AioException : public std::exception {
  public:
-  AioException(const std::string& msg) : _msg(msg), _code(errno) {}
-  const char* what() const noexcept { return format("[errno=%d] %s", this->_code, this->_msg.data()).data(); }
+  AioException(const std::string& msg) : _code(errno), _msg(format("%s, [errno=%d]", msg.data(), errno)) {}
+  const char* what() const noexcept { return this->_msg.data(); }
 
  private:
   const std::string _msg;
