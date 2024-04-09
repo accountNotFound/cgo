@@ -1,4 +1,5 @@
 include_directories(".")
+include_directories("..")
 
 aux_source_directory("." src)
 

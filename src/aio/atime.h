@@ -1,24 +1,19 @@
-#pragma once
+#include "./event.h"
+#include "core/condition.h"
 
-#include <memory>
-
-#include "core/event.h"
-
-namespace cgo::impl {
+namespace cgo {
 
 class Timer {
  public:
-  Timer(unsigned long long millisec);
-  Timer(const Timer&) = delete;
+  Timer(unsigned long long milli_sec);
   ~Timer();
-  auto wait() -> Async<void>;
-  auto chan() const -> Channel<Event> { return this->_chan; }
+  Channel<void*>& chan() { return this->_chan; }
 
  private:
-  Fd _fd;
-  Channel<Event> _chan;
+  _impl::Fd _fd;
+  Channel<void*> _chan;
 };
 
-extern auto sleep(unsigned long long millisec) -> Async<void>;
+Coroutine<void> sleep(unsigned long long milli_sec);
 
-}  // namespace cgo::impl
+}  // namespace cgo

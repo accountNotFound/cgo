@@ -1,13 +1,29 @@
 #pragma once
 
-#include <stdio.h>
-
 #include <string>
-#include <vector>
 
-namespace cgo::impl {
+#ifdef USE_DEBUG
+#undef USE_DEBUG
+#define DEBUG(fmt, ...) printf("%s -> %s() [line: %d] " fmt "\n", __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#else
+#define DEBUG(fmt, ...)
+#endif
 
-// NOTE: this function will cause great performance lost
+#ifdef USE_ASSERT
+#define ASSERT(expr, fmt, ...)                                                                    \
+  {                                                                                               \
+    if (!(expr)) {                                                                                \
+      printf("%s -> %s() [line: %d] " fmt "\n", __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+      std::terminate();                                                                           \
+    }                                                                                             \
+  }
+#else
+#define ASSERT(expr, fmt, ...)
+#endif
+
+namespace cgo::util {
+
+// NOTE: this function will cause huge performance lost
 template <typename... Args>
 std::string format(const char* fmt, Args... args) {
   constexpr size_t oldlen = 512;
@@ -25,6 +41,4 @@ std::string format(const char* fmt, Args... args) {
   return buffer;
 }
 
-#define FORMAT(fmt, ...) format("%s -> %s() [line: %d] " fmt, __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__)
-
-}  // namespace cgo::impl
+}  // namespace cgo::util

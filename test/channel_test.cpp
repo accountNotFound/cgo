@@ -1,117 +1,61 @@
-#include "core/channel.h"
-
 #include <chrono>
 #include <string>
-#include <thread>
 
-#include "core/async.h"
-#include "core/context.h"
-#include "util/spin_lock.h"
+#include "core/condition.h"
+#include "core/executor.h"
 
 // #define USE_DEBUG
-#include "util/log.h"
+#include "util/format.h"
 
-using namespace cgo::impl;
+const size_t exec_num = 4;
+const size_t foo_num = 1000;
+const size_t foo_loop = 1000;
 
-namespace single_channel_test {
-
-const size_t exec_num = 10;
-size_t foo_num = 1000, foo_loop = 1000;
+cgo::Mutex mutex;
 size_t end_num = 0;
 
-// Channel<bool> lock(1);
-Mutex lock;
+cgo::Coroutine<void> foo(std::string name) {
+  cgo::Channel<std::string> schan(10);
+  cgo::Channel<int> ichan;
 
-Async<void> foo(std::string name) {
-  DEBUG("[TH-{%u}]: coroutine(%s) start", std::this_thread::get_id(), name.data());
   for (int i = 0; i < foo_loop; i++) {
-    // co_await lock.send(true);
-    co_await lock.lock();
-    DEBUG("[TH-{%u}]: coroutine(%s) lock", std::this_thread::get_id(), name.data());
-    end_num++;
-    // lock.recv_nowait();
-    lock.unlock();
-    DEBUG("[TH-{%u}]: coroutine(%s) unlock", std::this_thread::get_id(), name.data());
+    cgo::spawn([](cgo::Channel<std::string> in, cgo::Channel<int> out) -> cgo::Coroutine<void> {
+      std::string s = co_await in.recv();
+      // DEBUG("recv s=%s\n", s.data());
+      co_await out.send(1);
+      // DEBUG("send s=%s\n", s.data());
+    }(schan, ichan));
+
+    co_await schan.send(std::string(name));
   }
-  DEBUG("[TH-{%u}]: coroutine(%s) end", std::this_thread::get_id(), name.data());
-}
-
-int test() {
-  Context ctx;
-  ctx.start(exec_num);
-  for (int i = 0; i < foo_num; i++) {
-    std::string name = "foo_" + std::to_string(i);
-    ctx.spawn(foo(name), name);
-  }
-  while (end_num < foo_num * foo_loop) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  ctx.stop();
-  if (end_num != foo_num * foo_loop) {
-    return -1;
-  }
-  return 0;
-}
-
-}  // namespace single_channel_test
-
-namespace multi_channel_test {
-
-const size_t exec_num = 10;
-size_t foo_num = 1000, foo_loop = 1000;
-size_t end_num = 0;
-
-Mutex lock;
-
-Async<void> foo(std::string name) {
-  DEBUG("%s start", name.data());
-  Channel<std::string> outchan(foo_num);
   for (int i = 0; i < foo_loop; i++) {
-    // NOTE: do not use lambda capture here, same as reference
-    Context::current().spawn([](Channel<std::string> outchan, int i) -> Async<void> {
-      DEBUG("spawn_%d start", i);
-      outchan.send_nowait("hello");
-      DEBUG("spawn_%d send %s", i, "hello");
-      co_return;
-    }(outchan, i));
+    co_await ichan.recv();
+    DEBUG("%s recv %d/%lu\r", name.data(), i, foo_loop);
   }
-  int recv_cnt = 0;
-  while (recv_cnt < foo_loop) {
-    co_await outchan.recv();
-    recv_cnt++;
-  }
-  co_await lock.lock();
+
+  co_await mutex.lock();
   end_num++;
-  DEBUG("%s end, end_num=%d", name.data(), end_num);
-  lock.unlock();
+  DEBUG("%s inc, end_num=%lu\n", name.data(), end_num);
+  mutex.unlock();
 }
-
-int test() {
-  Context ctx;
-  ctx.start(exec_num);
-  for (int i = 0; i < foo_num; i++) {
-    std::string name = "foo_" + std::to_string(i);
-    ctx.spawn(foo(name), name);
-  }
-  while (end_num < foo_num) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  ctx.stop();
-  if (end_num != foo_num) {
-    return -1;
-  }
-  return 0;
-}
-
-}  // namespace multi_channel_test
 
 int main() {
-  int code = single_channel_test::test();
-  if (code != 0) {
-    return code;
+  cgo::_impl::ScheduleContext ctx;
+  cgo::_impl::TaskExecutor exec(&ctx, nullptr);
+
+  exec.start(exec_num);
+  for (int i = 0; i < foo_num; i++) {
+    std::string name = "foo_" + std::to_string(i);
+    cgo::spawn(foo(name));
   }
-  code = multi_channel_test::test();
-  if (code != 0) {
-    return code;
+
+  size_t target_num = foo_num;
+  while (end_num < target_num) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    DEBUG("end_num=%lu, target_num=%lu\r", end_num, target_num);
   }
+  if (end_num != target_num) {
+    return -1;
+  }
+  exec.stop();
 }

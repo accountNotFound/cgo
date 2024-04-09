@@ -1,12 +1,11 @@
-#include "core/async.h"
+#include "core/coroutine.h"
 
 #include <stdio.h>
 
+#include <any>
 #include <string>
 
-using namespace cgo::impl;
-
-Async<int> bar(int n) {
+cgo::Coroutine<int> bar(int n) {
   int res = 0;
   for (int i = 0; i < n; i++) {
     if (i > 5) {
@@ -20,7 +19,7 @@ Async<int> bar(int n) {
   co_return std::move(res);
 }
 
-Async<std::any> foo(int n) {
+cgo::Coroutine<std::any> foo(int n) {
   bool has_err = false;
   std::string res = "";
   for (int i = 0; i < n; i++) {
@@ -39,7 +38,7 @@ Async<std::any> foo(int n) {
   co_return std::move(res);
 }
 
-Async<void> biz() {
+cgo::Coroutine<void> biz() {
   printf("biz start\n");
   auto res = co_await foo(10);
   printf("res type=<%s>\n", res.type().name());
