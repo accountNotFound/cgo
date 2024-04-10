@@ -32,8 +32,11 @@ cgo::Coroutine<void> foo(std::string name) {
   for (int i = 0; i < foo_loop; i++) {
     cgo::Timer timer(1500);
     auto timeout_ch = timer.chan();
-    for (cgo::Selector s;;) {
-      if (s.test(chan3)) {
+    auto empty_ch = cgo::Channel<int>();
+    for (cgo::Selector s;; co_await s.wait()) {
+      if (s.test(empty_ch)) {
+        break;
+      } else if (s.test(chan3)) {
         int res = s.cast<int>();
         DEBUG("%s select %d\n", name.data(), res);
         break;
@@ -49,9 +52,6 @@ cgo::Coroutine<void> foo(std::string name) {
         void* res = s.cast<void*>();
         DEBUG("%s select %p\n", name.data(), res);
         break;
-      } else {
-        // break
-        co_await s.wait();
       }
     }
     // DEBUG("%s: %d/%d select done\n", name.data(), i, foo_loop);

@@ -15,7 +15,7 @@ cgo::Coroutine<int> bar() {
 }
 
 cgo::Coroutine<std::string> foo() {
-  int i = co_await bar(); // wait bar() finishe and get returned value
+  int i = co_await bar(); // wait bar() finish and get returned value
   co_return std::to_string(i);
 }
 ```

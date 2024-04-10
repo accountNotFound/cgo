@@ -190,7 +190,7 @@ class Selector {
 
   template <typename T>
   bool test(ReadChannel<T>& chan) {
-    auto listen = [this, &chan]() {
+    auto listen = [this, chan]() {
       cgo::spawn([](ReadChannel<T> value_chan, Channel<size_t> event_chan) -> Coroutine<void> {
         const unsigned long long test_timeout_ms = 60 * 1000;  // 1 minute
         while (true) {
@@ -220,6 +220,12 @@ class Selector {
     }
     // try receive from target channel. Or try receive from every channel in first scan loop
     return touch();
+  }
+
+  template <typename T>
+  bool test(Channel<T>& chan) {
+    ReadChannel<T> rchan(chan);
+    return this->test(rchan);
   }
 
   template <typename T>
