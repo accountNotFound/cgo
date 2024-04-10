@@ -221,6 +221,8 @@ class Selector {
   size_t _current_event = 0;
 };
 
+// Make a channel for given coroutine object. When coroutine finish, the return value will be sent to tish channel.
+// if coroutine return void, a const `true` will be sent
 template <typename T, typename ChanT = std::conditional<std::is_same_v<T, void>, bool, T>::type>
 Channel<ChanT> collect(Coroutine<T>&& target) {
   Channel<ChanT> chan(1);
