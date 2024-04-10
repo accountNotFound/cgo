@@ -1,10 +1,6 @@
-#include "aio/socket.h"
+#include "./socket.h"
 
-#include "aio/error.h"
-
-// #define USE_DEBUG
 #include "util/format.h"
-#include "util/log.h"
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
 #include <arpa/inet.h>
@@ -12,151 +8,175 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
-namespace cgo::impl {
+namespace cgo {
 
-const size_t SocketBufferSize = 128;
+using _impl::Event;
 
-auto set_fd_nonblock(Fd fd) -> int {
-  int flags = ::fcntl(fd, F_GETFL);
-  flags |= O_NONBLOCK;
-  return ::fcntl(fd, F_SETFL, flags);
+SocketException::SocketException(_impl::Fd fd, const std::string& msg)
+#if defined(linux) || defined(__linux) || defined(__linux__)
+    : _code(errno),
+      _fd(fd),
+      _msg(util::format("[fd=%d, errno=%d], %s", fd, errno, msg.data()))
+#endif
+{
 }
 
-Socket::Socket() : Socket(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) {}
-
-Socket::Socket(Fd fd) : _fd(fd), _chan(1) {
-  if (int(this->_fd) < 0) {
-    throw AioException(FORMAT("socket{fd=%d} create fail", this->_fd));
-  }
-  if (set_fd_nonblock(this->_fd) < 0) {
-    throw AioException(FORMAT("socket{fd=%d} create set nonblock fail", this->_fd));
-  }
-  Context::current().handler().add(this->_fd, 0, this->_chan);
-  DEBUG("socket{fd=%d} created", this->_fd);
+Socket::Socket()
+    : Socket(
+#if defined(linux) || defined(__linux) || defined(__linux__)
+          ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+#endif
+      ) {
 }
 
-Socket::~Socket() {}
+Socket::Socket(_impl::Fd fd) : _chan(INT_MAX), _fd(fd) {
+  if (this->_fd < 0) {
+    throw SocketException(this->_fd, "create socket fail");
+  }
 
-auto Socket::recv(size_t size) -> Async<std::string> {
-  std::string res(size, '\n');
+  int flags = ::fcntl(this->_fd, F_GETFL) | O_NONBLOCK;
+  if (::fcntl(this->_fd, F_SETFL, flags) < 0) {
+    throw SocketException(this->_fd, "set nonblock fail");
+  }
+}
+
+Coroutine<std::string> Socket::recv(size_t size) {
+#if defined(linux) || defined(__linux) || defined(__linux__)
+  std::string res(size, '\0');
   while (true) {
     int n = ::recv(this->_fd, res.data(), res.size(), 0);
     if (n > 0) {
-      DEBUG("socket{fd=%d} recv %d bytes", this->_fd, n);
       res.resize(n);
       co_return std::move(res);
+    } else if (n == 0) {
+      throw SocketException(this->_fd, "close by other side in recv");
     }
-    if (n == 0) {
-      throw AioException(FORMAT("socket{fd=%d} close by other side", this->_fd));
-    }
-    if (errno = EAGAIN) {
-      Context::current().handler().mod(this->_fd, Event::IN | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR && errno != EAGAIN) {
-        throw AioException(FORMAT("socket{fd=%d} recv fail", this->_fd));
+    // n<0
+    if (errno == EAGAIN) {
+      Event ev = co_await this->_chan.recv();
+      if (ev & Event::ERR) {
+        throw SocketException(this->_fd, "recv fail");
       }
     } else {
-      throw AioException(FORMAT("socket{fd=%d} recv fail", this->_fd));
+      throw SocketException(this->_fd, "recv fail");
     }
   }
+#endif
 }
 
-auto Socket::send(const std::string& data) -> Async<void> {
+Coroutine<void> Socket::send(const std::string& data) {
+#if defined(linux) || defined(__linux) || defined(__linux__)
   for (int i = 0; i < data.size();) {
-    int n = ::send(this->_fd, data.data() + i, std::min(SocketBufferSize, data.size() - i), 0);
+    int n = ::send(this->_fd, data.data() + i, data.size() - i, 0);
     if (n > 0) {
-      DEBUG("socket{fd=%d} send %d bytes", this->_fd, n);
       i += n;
       continue;
     }
     if (n == 0) {
-      throw AioException(FORMAT("socket{fd=%d} close by other side", this->_fd));
+      throw SocketException(this->_fd, "close by other side in send");
     }
     if (errno = EAGAIN) {
-      Context::current().handler().mod(this->_fd, Event::OUT | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR && errno != EAGAIN) {
-        throw AioException(FORMAT("socket{fd=%d} send fail", this->_fd));
+      _impl::EventHandler::current->mod(this->_fd, Event::OUT | Event::ONESHOT);
+      Event ev = co_await this->_chan.recv();
+      _impl::EventHandler::current->mod(this->_fd, Event::IN);
+      if (ev & Event::ERR) {
+        throw SocketException(this->_fd, "send fail");
       }
     } else {
-      throw AioException(FORMAT("socket{fd=%d} send fail", this->_fd));
+      throw SocketException(this->_fd, "send fail");
     }
   }
+#endif
 }
 
 void Socket::bind(size_t port) {
+#if defined(linux) || defined(__linux) || defined(__linux__)
   ::sockaddr_in saddr;
   saddr.sin_family = AF_INET;
   saddr.sin_port = htons(port);
   saddr.sin_addr.s_addr = INADDR_ANY;  // 0 = 0.0.0.0
   int optval = 1;
   if (::setsockopt(this->_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
-    throw AioException(FORMAT("socket{fd=%d} set addr reuse fail", this->_fd));
+    throw SocketException(this->_fd, "set addr reuse fail");
   }
   if (::bind(this->_fd, (struct ::sockaddr*)&saddr, sizeof(saddr)) < 0) {
-    throw AioException(FORMAT("socket{fd=%d} bind addr fail", this->_fd));
+    throw SocketException(this->_fd, ("bind addr fail"));
   }
+#endif
 }
 
 void Socket::listen(size_t backlog) {
+#if defined(linux) || defined(__linux) || defined(__linux__)
   if (::listen(this->_fd, backlog) < 0) {
-    throw AioException(FORMAT("socket{fd=%d} listen fail", this->_fd));
+    throw SocketException(this->_fd, "listen fail");
   }
+#endif
+  _impl::EventHandler::current->add(this->_fd, Event::IN,
+                                    [chan = this->_chan](Event ev) mutable { chan.send_nowait(std::move(ev)); });
 }
 
-auto Socket::accept() -> Async<Socket> {
+Coroutine<Socket> Socket::accept() {
+#if defined(linux) || defined(__linux) || defined(__linux__)
   ::sockaddr_in caddr = {};
   ::socklen_t sin_size = sizeof(::sockaddr_in);
   while (true) {
     int fd = ::accept(this->_fd, (::sockaddr*)&caddr, &sin_size);
     if (fd > 0) {
-      DEBUG("socket{fd=%d} accept %d", this->_fd, fd);
-      co_return Socket(fd);
+      Socket sock(fd);
+      _impl::EventHandler::current->add(fd, Event::IN,
+                                        [chan = sock._chan](Event ev) mutable { chan.send_nowait(std::move(ev)); });
+      co_return std::move(sock);
     }
     if (errno == EAGAIN) {
-      Context::current().handler().mod(this->_fd, Event::IN | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR && errno != EAGAIN) {
-        throw AioException(FORMAT("socket{fd=%d} accept fail", this->_fd));
+      Event ev = co_await this->_chan.recv();
+      if (ev & Event::ERR) {
+        throw SocketException(this->_fd, "accept fail");
       }
     } else {
-      throw AioException(FORMAT("socket{fd=%d} accept fail", this->_fd));
+      throw SocketException(this->_fd, "accept fail");
     }
   }
+#endif
 }
 
-auto Socket::connect(const char* ip, size_t port) -> Async<void> {
+Coroutine<void> Socket::connect(const char* ip, size_t port) {
+#if defined(linux) || defined(__linux) || defined(__linux__)
   ::sockaddr_in saddr;
   saddr.sin_family = AF_INET;
   saddr.sin_port = htons(port);
   inet_pton(AF_INET, ip, &saddr.sin_addr.s_addr);
   while (true) {
     if (::connect(this->_fd, (::sockaddr*)&saddr, sizeof(saddr)) == 0) {
-      DEBUG("socket{fd=%d} connect to %s:%d", this->_fd, ip, port);
       co_return;
     }
     if (errno == EINPROGRESS) {
-      DEBUG("socket{fd=%d} connect inprogres", this->_fd);
-      Context::current().handler().mod(this->_fd, Event::OUT | Event::ONESHOT);
-      if ((co_await this->_chan.recv()) & Event::ERR && errno != EINPROGRESS && errno != EAGAIN) {
-        throw AioException(FORMAT("socket{fd=%d} connect fail", this->_fd));
+      _impl::EventHandler::current->add(this->_fd, Event::OUT,
+                                        [chan = this->_chan](Event ev) mutable { chan.send_nowait(std::move(ev)); });
+      Event ev = co_await this->_chan.recv();
+      if (ev & Event::ERR) {
+        throw SocketException(this->_fd, "connect fail");
       }
       int conn_status = 0;
       ::socklen_t len = sizeof(conn_status);
       if (::getsockopt(this->_fd, SOL_SOCKET, SO_ERROR, &conn_status, &len) < 0 || conn_status != 0) {
-        throw AioException(FORMAT("socket{fd=%d} connect fail", this->_fd));
+        throw SocketException(this->_fd, "connect fail");
       }
+      _impl::EventHandler::current->mod(this->_fd, Event::IN);
       co_return;
     } else {
-      throw AioException(FORMAT("socket{fd=%d} connect fail", this->_fd));
+      throw SocketException(this->_fd, "connect fail");
     }
   }
+#endif
 }
 
 void Socket::close() {
-  Context::current().handler().del(this->_fd);
-  ::close(this->_fd);
-  DEBUG("socket{%d} close", this->_fd);
+  if (this->_fd > 0) {
+    _impl::EventHandler::current->del(this->_fd);
+    ::close(this->_fd);
+  }
 }
 
-}  // namespace cgo::impl
-
-#endif
+}  // namespace cgo

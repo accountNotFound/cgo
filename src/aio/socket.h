@@ -1,30 +1,44 @@
 #pragma once
 
-#include "core/event.h"
+#include "./event.h"
+#include "core/condition.h"
 
-namespace cgo::impl {
+namespace cgo {
 
-// for now only TCP and IPV4 are supported
+// only TCP and IPV4 are supported now. You should explicitly call `close()` if you don't use the socket anymore
 class Socket {
  public:
   Socket();
-  Socket(Fd fd);
-  ~Socket();
 
-  auto recv(size_t size) -> Async<std::string>;
-  auto send(const std::string& data) -> Async<void>;
+  Coroutine<std::string> recv(size_t size);
+  Coroutine<void> send(const std::string& data);
   void close();
 
-  auto connect(const char* ip, size_t port) -> Async<void>;
+  Coroutine<void> connect(const char* ip, size_t port);
   void bind(size_t port);
-  void listen(size_t backlog = 5);
-  auto accept() -> Async<Socket>;
+  void listen(size_t backlog = 1024);
+  Coroutine<Socket> accept();
 
-  auto fileno() const -> Fd { return this->_fd; }
+  _impl::Fd fileno() const { return this->_fd; }
 
  private:
-  Fd _fd;
-  Channel<Event> _chan;
+  Socket(_impl::Fd fd);
+
+ private:
+  _impl::Fd _fd;
+  Channel<_impl::Event> _chan;
 };
 
-}  // namespace cgo::impl
+class SocketException : public std::exception {
+ public:
+  SocketException(_impl::Fd fd, const std::string& msg);
+  const char* what() const noexcept { return this->_msg.data(); }
+  int errcode() const { return this->_code; }
+
+ private:
+  std::string _msg;
+  int _code;
+  _impl::Fd _fd;
+};
+
+}  // namespace cgo

@@ -4,7 +4,7 @@
 #include <memory>
 #include <mutex>
 
-namespace cgo::impl {
+namespace cgo::util {
 
 class SpinLock {
  public:
