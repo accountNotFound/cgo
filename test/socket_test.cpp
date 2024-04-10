@@ -23,14 +23,15 @@ cgo::Coroutine<void> run_server() {
         cgo::Defer defer([&conn]() { conn.close(); });
 
         // select an activated channel and do corresponding actions. Here is a simple recv with timeout example
-        cgo::Channel<std::string> recv_chan = cgo::collect(conn.recv(256));
-        cgo::Timer recv_timeout(10 * 1000);
+        auto recv_chan = cgo::collect(conn.recv(256));
+        cgo::Timer recv_timer(10 * 1000);
+        auto recv_timeout = recv_timer.chan();
         for (cgo::Selector s;; co_await s.wait()) {
           if (s.test(recv_chan)) {
             auto req = s.cast<std::string>();
             co_await conn.send("echo from server: " + req);
             break;
-          } else if (s.test(recv_timeout.chan())) {
+          } else if (s.test(recv_timeout)) {
             printf("in server: conn{%d} recv timeout after 10 sec\n", conn.fileno());
             break;
           }
@@ -50,14 +51,15 @@ cgo::Coroutine<void> run_client(int cli_id) {
       cgo::Defer defer([&conn]() { conn.close(); });
 
       // connect with timeout
-      cgo::Channel<bool> conn_chan = cgo::collect(conn.connect("127.0.0.1", 8080));
-      cgo::Timer conn_timeout(10 * 1000);
+      auto conn_chan = cgo::collect(conn.connect("127.0.0.1", 8080));
+      cgo::Timer conn_timer(10 * 1000);
+      auto conn_timeout = conn_timer.chan();
       bool connect_flag = false;
       for (cgo::Selector s;; co_await s.wait()) {
         if (s.test(conn_chan)) {
           connect_flag = true;
           break;
-        } else if (s.test(conn_timeout.chan())) {
+        } else if (s.test(conn_timeout)) {
           printf("in client[%d]: conn{%d} connect timeout after 10 sec\n", cli_id, conn.fileno());
           break;
         }
@@ -69,8 +71,9 @@ cgo::Coroutine<void> run_client(int cli_id) {
       co_await conn.send(req);
 
       // recv with timeout
-      cgo::Channel<std::string> recv_chan = cgo::collect(conn.recv(256));
-      cgo::Timer recv_timeout(10 * 1000);
+      auto recv_chan = cgo::collect(conn.recv(256));
+      cgo::Timer recv_timer(10 * 1000);
+      auto recv_timeout = recv_timer.chan();
       for (cgo::Selector s;; co_await s.wait()) {
         if (s.test(recv_chan)) {
           auto rsp = s.cast<std::string>();
@@ -79,7 +82,7 @@ cgo::Coroutine<void> run_client(int cli_id) {
           mtx.unlock();
           i++;
           break;
-        } else if (s.test(recv_timeout.chan())) {
+        } else if (s.test(recv_timeout)) {
           printf("in client[%d]: conn{%d} connect timeout after 10 sec\n", cli_id, conn.fileno());
           break;
         }

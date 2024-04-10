@@ -7,7 +7,7 @@ class Timer {
  public:
   Timer(unsigned long long milli_sec);
   ~Timer();
-  Channel<void*>& chan() { return this->_chan; }
+  ReadChannel<void*> chan() { return this->_chan; }
 
  private:
   _impl::Fd _fd;
