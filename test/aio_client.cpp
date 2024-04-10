@@ -26,10 +26,11 @@ cgo::Coroutine<void> run_client(int cli_id) {
 
     auto conn_chan = cgo::collect(client.connect("127.0.0.1", 8080));
     cgo::Timer conn_timer(timeout_ms);
+    auto conn_timeout = conn_timer.chan();
     for (cgo::Selector s;; co_await s.wait()) {
       if (s.test(conn_chan)) {
         break;
-      } else if (s.test(conn_timer.chan())) {
+      } else if (s.test(conn_timeout)) {
         throw cgo::SocketException(client.fileno(), "connect timeout");
       }
     }
@@ -39,11 +40,12 @@ cgo::Coroutine<void> run_client(int cli_id) {
 
     auto recv_chan = cgo::collect(client.recv(256));
     cgo::Timer recv_timer(timeout_ms);
+    auto recv_timeout = recv_timer.chan();
     for (cgo::Selector s;; co_await s.wait()) {
       if (s.test(recv_chan)) {
         auto rsp = s.cast<std::string>();
         break;
-      } else if (s.test(conn_timer.chan())) {
+      } else if (s.test(recv_timeout)) {
         throw cgo::SocketException(client.fileno(),
                                    "recv timeout, expect cli=" + std::to_string(cli_id) + ", i=" + std::to_string(i));
       }

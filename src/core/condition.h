@@ -58,7 +58,10 @@ class Channel : public ReferenceType {
 
  public:
   Channel(size_t capacity = 0)
-      : _cond(std::make_shared<_impl::Condition>(2)), _buffer(std::make_shared<std::queue<T>>()), _capacity(capacity) {}
+      : _cond(std::make_shared<_impl::Condition>(2)),
+        _buffer(std::make_shared<std::queue<T>>()),
+        _read_only_cnt(std::make_shared<std::atomic<int>>(0)),
+        _capacity(capacity) {}
 
   // return true if channel is not empty. This method will eventually return after `timeout_ms` if `timeout_ms>0`
   Coroutine<bool> test(unsigned long long timeout_ms = 0) {
@@ -157,10 +160,26 @@ class Channel : public ReferenceType {
     return res;
   }
 
+ protected:
+  std::shared_ptr<std::atomic<int>> _read_only_cnt;
+
  private:
   std::shared_ptr<_impl::Condition> _cond;
   std::shared_ptr<std::queue<T>> _buffer;
   size_t _capacity;
+};
+
+template <typename T>
+class ReadChannel : public Channel<T> {
+ public:
+  ReadChannel(const Channel<T>& chan) : Channel<T>(chan) { this->_read_only_cnt->fetch_add(1); }
+  ReadChannel(const ReadChannel<T>& rchan) : Channel<T>(rchan) { this->_read_only_cnt->fetch_add(1); }
+  ~ReadChannel() { this->_read_only_cnt->fetch_add(-1); }
+
+  int read_count() const { return this->_read_only_cnt->load(); }
+
+  Coroutine<void> send(T&&) = delete;
+  bool send_nowait(T&&) = delete;
 };
 
 class Selector {
@@ -170,15 +189,15 @@ class Selector {
   Selector(Selector&&) = delete;
 
   template <typename T>
-  bool test(Channel<T>& chan) {
+  bool test(ReadChannel<T>& chan) {
     auto listen = [this, &chan]() {
-      cgo::spawn([](Channel<T> value_chan, Channel<size_t> event_chan) -> Coroutine<void> {
+      cgo::spawn([](ReadChannel<T> value_chan, Channel<size_t> event_chan) -> Coroutine<void> {
         const unsigned long long test_timeout_ms = 60 * 1000;  // 1 minute
         while (true) {
           if (co_await value_chan.test(test_timeout_ms)) {
             event_chan.send_nowait(value_chan.id());
             break;
-          } else if (value_chan.use_count() == 1) {
+          } else if (value_chan.read_count() == value_chan.use_count()) {
             // the value_chan is dead, end this coroutine
             break;
           }
@@ -222,14 +241,14 @@ class Selector {
 };
 
 // Make a channel for given coroutine object. When coroutine finish, the return value will be sent to tish channel.
-// if coroutine return void, a const `true` will be sent
-template <typename T, typename ChanT = std::conditional<std::is_same_v<T, void>, bool, T>::type>
-Channel<ChanT> collect(Coroutine<T>&& target) {
+// if coroutine return void, a const `nullptr` will be sent
+template <typename T, typename ChanT = std::conditional<std::is_same_v<T, void>, void*, T>::type>
+ReadChannel<ChanT> collect(Coroutine<T>&& target) {
   Channel<ChanT> chan(1);
   _impl::ScheduleTask task = [](Coroutine<T> target, Channel<ChanT> chan) -> Coroutine<void> {
     if constexpr (std::is_same_v<T, void>) {
       co_await target;
-      co_await chan.send(true);
+      co_await chan.send(nullptr);
     } else {
       T res = co_await target;
       co_await chan.send(std::move(res));

@@ -16,7 +16,7 @@ const size_t foo_loop = 10;
 cgo::Mutex mutex;
 size_t end_num = 0;
 
-cgo::Channel<int> bar(unsigned long long timeout_ms) {
+cgo::ReadChannel<int> bar(unsigned long long timeout_ms) {
   cgo::Channel<int> res;
   cgo::spawn([](cgo::Channel<int> chan, unsigned long long timeout_ms) -> cgo::Coroutine<void> {
     co_await cgo::sleep(timeout_ms);
@@ -31,6 +31,7 @@ cgo::Coroutine<void> foo(std::string name) {
   auto chan3 = bar(3000);
   for (int i = 0; i < foo_loop; i++) {
     cgo::Timer timer(1500);
+    auto timeout_ch = timer.chan();
     for (cgo::Selector s;;) {
       if (s.test(chan3)) {
         int res = s.cast<int>();
@@ -44,7 +45,7 @@ cgo::Coroutine<void> foo(std::string name) {
         int res = s.cast<int>();
         DEBUG("%s select %d\n", name.data(), res);
         break;
-      } else if (s.test(timer.chan())) {
+      } else if (s.test(timeout_ch)) {
         void* res = s.cast<void*>();
         DEBUG("%s select %p\n", name.data(), res);
         break;
