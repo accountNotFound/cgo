@@ -3,14 +3,14 @@
 
 namespace cgo {
 
-class Timer {
+// a simple disposable timer now, can not be cancel
+class Timer : public ReferenceType {
  public:
   Timer(unsigned long long milli_sec);
-  ~Timer();
-  ReadChannel<void*> chan() { return this->_chan; }
+  ReadChannel<void*> chan() { return ReadChannel<void*>(this->_chan); }
 
  private:
-  _impl::Fd _fd;
+  _impl::Fd _fd = 0;
   Channel<void*> _chan;
 };
 

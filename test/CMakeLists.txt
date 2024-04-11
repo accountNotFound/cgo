@@ -24,5 +24,5 @@ target_link_libraries(aio_server cgo_core cgo_aio)
 add_executable(aio_client aio_client.cpp)
 target_link_libraries(aio_client cgo_core cgo_aio)
 
-add_executable(socket_test socket_test.cpp)
-target_link_libraries(socket_test cgo_core cgo_aio)
+# add_executable(socket_test socket_test.cpp)
+# target_link_libraries(socket_test cgo_core cgo_aio)

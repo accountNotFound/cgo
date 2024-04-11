@@ -37,30 +37,30 @@ void foo() {
 ```
 3. channel and select
 ```c++
-cgo::Coroutine<void> select_tset() {
-  cgo::Channel<int> ich; 
-  cgo::Channel<std::string> sch; 
+cgo::Coroutine<void> select() {
+  cgo::Channel<int> ichan;
+  cgo::Channel<std::string> schan;
 
-  cgo::spawn([](cgo::Channel<int> ich) -> cgo::Coroutine<void> {
-    int v = co_await ich.recv();
-    co_await ich.send(std::move(v));
-  }(ich));
+  cgo::spawn([](cgo::Channel<int> ichan, cgo::Channel<std::string> chan) -> cgo::Coroutine<void> {
+    cgo::sleep(1000);
+    co_await schan.send("123");
+    int v = co_await ichan.recv(); // block here forever
+  }(ichan, schan));
 
-  cgo::spawn([](cgo::Channel<std::string> sch) -> cgo::Coroutine<void> {
-    co_await cgo::sleep(1000);
-    co_await sch.send("123");
-  }(sch));
-
-  // when any of channel converts to readable, selector will be notified and test certain channel again
-  for (cgo::Selector s;; co_await s.wait()) {
-    if (s.test(ich)) {
-      // this channel is always empty, so this block is unreachable
-      int num = s.cast<int>();
-      break;
-    } else if (s.test(sch)) {
-      // readable after 1 second, cast to get string value from channel 
-      auto str = s.cast<std::string>();
-      break;
+  {
+    // suggest to destroy selector immediately when case-switch done
+    cgo::Selector s;
+    s.on("empty_ichan"_u, ichan)
+    .on("schan_after_1_sec"_u, schan);
+    switch ((co_await s.recv())) {
+      case "empty_ichan"_u: {
+        // never be here
+        break;
+      }
+      case "schan_after_1_sec"_u: {
+        auto str = s.cast<std::string>(); // selector recv value with any type, cast it
+        break;
+      }
     }
   }
 }

@@ -6,7 +6,7 @@
 namespace cgo {
 
 // only TCP and IPV4 are supported now. You should explicitly call `close()` if you don't use the socket anymore
-class Socket {
+class Socket : public ReferenceType {
  public:
   Socket();
 
@@ -25,7 +25,7 @@ class Socket {
   Socket(_impl::Fd fd);
 
  private:
-  _impl::Fd _fd;
+  _impl::Fd _fd = 0;
   Channel<_impl::Event> _chan;
 };
 

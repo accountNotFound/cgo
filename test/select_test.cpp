@@ -26,35 +26,33 @@ cgo::ReadChannel<int> bar(unsigned long long timeout_ms) {
 }
 
 cgo::Coroutine<void> foo(std::string name) {
-  auto chan1 = bar(1000);
-  auto chan2 = bar(2000);
-  auto chan3 = bar(3000);
   for (int i = 0; i < foo_loop; i++) {
-    cgo::Timer timer(1500);
-    auto timeout_ch = timer.chan();
-    auto empty_ch = cgo::Channel<int>();
-    for (cgo::Selector s;; co_await s.wait()) {
-      if (s.test(empty_ch)) {
+    cgo::Selector s;
+    s.on("bar_1"_u, bar(1000))
+        .on("bar_2"_u, bar(2000))
+        .on("bar_3"_u, bar(3000))
+        .on("timeout"_u, cgo::Timer(i < 3 ? 500 : 1500).chan())
+        .on("empty"_u, cgo::Channel<int>());
+
+    switch ((co_await s.recv())) {
+      case "bar_1"_u:
+      case "bar_2"_u:
+      case "bar_3"_u: {
+        auto v = s.cast<int>();
+        DEBUG("%s select %d\n", name.data(), v);
         break;
-      } else if (s.test(chan3)) {
-        int res = s.cast<int>();
-        DEBUG("%s select %d\n", name.data(), res);
-        break;
-      } else if (s.test(chan2)) {
-        int res = s.cast<int>();
-        DEBUG("%s select %d\n", name.data(), res);
-        break;
-      } else if (s.test(chan1)) {
-        int res = s.cast<int>();
-        DEBUG("%s select %d\n", name.data(), res);
-        break;
-      } else if (s.test(timeout_ch)) {
-        void* res = s.cast<void*>();
+      }
+      case "timeout"_u: {
+        void *res = s.cast<void *>();
         DEBUG("%s select %p\n", name.data(), res);
         break;
       }
+      case "empty"_u: {
+        ASSERT(false, "nerver be here");
+        break;
+      }
+        // if you want a default block, co_await s.wait_or_default(your_default_key))
     }
-    // DEBUG("%s: %d/%d select done\n", name.data(), i, foo_loop);
   }
   co_await mutex.lock();
   end_num += 1;

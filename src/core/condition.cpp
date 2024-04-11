@@ -77,16 +77,33 @@ void Mutex::unlock() {
   this->_cond->notify(0);
 }
 
-Coroutine<size_t> Selector::wait() {
-  if (this->_current_event == 0) {
-    for (auto& [_, listen] : this->_event_listeners) {
-      listen();
-    }
-  } else {
-    this->_event_listeners[this->_current_event]();
+Coroutine<int> Selector::recv() {
+  for (auto& [_, listen] : this->_listeners) {
+    listen();
   }
-  this->_current_event = co_await this->_potential_events.recv();
-  // now current_event's listener is done
+  while (true) {
+    int key = co_await this->_active_chan.recv();
+    if (this->_active_callbacks[key]()) {
+      this->_done_flag->store(true);
+      co_return std::move(key);
+    } else {
+      this->_listeners[key]();
+    }
+  }
+}
+
+Coroutine<int> Selector::recv_or_default(int key) {
+  for (auto& [_, listen] : this->_listeners) {
+    listen();
+  }
+  std::optional<int> opt = this->_active_chan.recv_nowait();
+  if (opt.has_value() && this->_active_callbacks[*opt]()) {
+    this->_done_flag->store(true);
+    co_return std::move(*opt);
+  } else {
+    this->_done_flag->store(true);
+    co_return std::move(key);
+  }
 }
 
 }  // namespace cgo

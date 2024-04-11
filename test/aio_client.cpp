@@ -23,31 +23,34 @@ cgo::Coroutine<void> run_client(int cli_id) {
   for (int i = 0; i < conn_num; i++) {
     cgo::Socket client;
     CallbackGuard guard([&client]() { client.close(); });
-
-    auto conn_chan = cgo::collect(client.connect("127.0.0.1", 8080));
-    cgo::Timer conn_timer(timeout_ms);
-    auto conn_timeout = conn_timer.chan();
-    for (cgo::Selector s;; co_await s.wait()) {
-      if (s.test(conn_chan)) {
-        break;
-      } else if (s.test(conn_timeout)) {
-        throw cgo::SocketException(client.fileno(), "connect timeout");
+    {
+      cgo::Selector s;
+      s.on("connect"_u, cgo::collect(client.connect("127.0.0.1", 8080)));
+      s.on("timeout"_u, cgo::Timer(timeout_ms).chan());
+      switch (co_await s.recv()) {
+        case "connect"_u: {
+          break;
+        };
+        case "timeout"_u: {
+          throw cgo::SocketException(client.fileno(), "connect timeout");
+        }
       }
     }
-
     auto req = cgo::util::format("cli{%d} send data %d", cli_id, i);
     co_await client.send(req);
-
-    auto recv_chan = cgo::collect(client.recv(256));
-    cgo::Timer recv_timer(timeout_ms);
-    auto recv_timeout = recv_timer.chan();
-    for (cgo::Selector s;; co_await s.wait()) {
-      if (s.test(recv_chan)) {
-        auto rsp = s.cast<std::string>();
-        break;
-      } else if (s.test(recv_timeout)) {
-        throw cgo::SocketException(client.fileno(),
-                                   "recv timeout, expect cli=" + std::to_string(cli_id) + ", i=" + std::to_string(i));
+    {
+      cgo::Selector s;
+      s.on("recv"_u, cgo::collect(client.recv(256)));
+      s.on("timeout"_u, cgo::Timer(timeout_ms).chan());
+      switch (co_await s.recv()) {
+        case "recv"_u: {
+          auto rsp = s.cast<std::string>();
+          break;
+        };
+        case "timeout"_u: {
+          throw cgo::SocketException(client.fileno(),
+                                     "recv timeout, expect cli=" + std::to_string(cli_id) + ", i=" + std::to_string(i));
+        }
       }
     }
   }

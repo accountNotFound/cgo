@@ -14,13 +14,11 @@ Timer::Timer(unsigned long long millisec) : _chan(1) {
   ts.it_value = timespec{(long)millisec / 1000, ((long)millisec % 1000) * 1000000};
   timerfd_settime(_fd, 0, &ts, nullptr);
   _impl::EventHandler::current->add(this->_fd, _impl::Event::IN | _impl::Event::ONESHOT,
-                                         [this](_impl::Event ev) { this->_chan.send_nowait(nullptr); });
+                                    [fd = this->_fd, chan = this->_chan](_impl::Event ev) mutable {
+                                      chan.send_nowait(nullptr);
+                                      ::close(fd);
+                                    });
 #endif
-}
-
-Timer::~Timer() {
-  _impl::EventHandler::current->del(this->_fd);
-  ::close(this->_fd);
 }
 
 Coroutine<void> sleep(unsigned long long milli_sec) {

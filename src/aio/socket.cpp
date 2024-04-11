@@ -176,6 +176,7 @@ void Socket::close() {
   if (this->_fd > 0) {
     _impl::EventHandler::current->del(this->_fd);
     ::close(this->_fd);
+    this->_fd = 0;
   }
 }
 

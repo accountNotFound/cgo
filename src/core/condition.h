@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "./context.h"
+#include "util/convert.h"
 
 namespace cgo::_impl {
 
@@ -58,10 +59,7 @@ class Channel : public ReferenceType {
 
  public:
   Channel(size_t capacity = 0)
-      : _cond(std::make_shared<_impl::Condition>(2)),
-        _buffer(std::make_shared<std::queue<T>>()),
-        _read_only_cnt(std::make_shared<std::atomic<int>>(0)),
-        _capacity(capacity) {}
+      : _cond(std::make_shared<_impl::Condition>(2)), _buffer(std::make_shared<std::queue<T>>()), _capacity(capacity) {}
 
   // return true if channel is not empty. This method will eventually return after `timeout_ms` if `timeout_ms>0`
   Coroutine<bool> test(unsigned long long timeout_ms = 0) {
@@ -146,8 +144,6 @@ class Channel : public ReferenceType {
 
   size_t id() const { return reinterpret_cast<size_t>(this->_buffer.get()); }
 
-  size_t use_count() const { return this->_buffer.use_count(); }
-
  private:
   void _do_send(T&& value) {
     this->_buffer->push(std::move(value));
@@ -160,9 +156,6 @@ class Channel : public ReferenceType {
     return res;
   }
 
- protected:
-  std::shared_ptr<std::atomic<int>> _read_only_cnt;
-
  private:
   std::shared_ptr<_impl::Condition> _cond;
   std::shared_ptr<std::queue<T>> _buffer;
@@ -172,11 +165,8 @@ class Channel : public ReferenceType {
 template <typename T>
 class ReadChannel : public Channel<T> {
  public:
-  ReadChannel(const Channel<T>& chan) : Channel<T>(chan) { this->_read_only_cnt->fetch_add(1); }
-  ReadChannel(const ReadChannel<T>& rchan) : Channel<T>(rchan) { this->_read_only_cnt->fetch_add(1); }
-  ~ReadChannel() { this->_read_only_cnt->fetch_add(-1); }
-
-  int read_count() const { return this->_read_only_cnt->load(); }
+  ReadChannel(const Channel<T>& chan) : Channel<T>(chan) {}
+  ReadChannel(const ReadChannel<T>& chan) : Channel<T>(chan) {}
 
   Coroutine<void> send(T&&) = delete;
   bool send_nowait(T&&) = delete;
@@ -184,66 +174,53 @@ class ReadChannel : public Channel<T> {
 
 class Selector {
  public:
-  Selector() : _potential_events(INT_MAX) {}
+  Selector() : _active_chan(INT_MAX), _done_flag(std::make_shared<std::atomic<bool>>(false)) {}
   Selector(const Selector&) = delete;
   Selector(Selector&&) = delete;
 
   template <typename T>
-  bool test(ReadChannel<T>& chan) {
-    auto listen = [this, chan]() {
-      cgo::spawn([](ReadChannel<T> value_chan, Channel<size_t> event_chan) -> Coroutine<void> {
-        const unsigned long long test_timeout_ms = 60 * 1000;  // 1 minute
-        while (true) {
-          if (co_await value_chan.test(test_timeout_ms)) {
-            event_chan.send_nowait(value_chan.id());
-            break;
-          } else if (value_chan.read_count() == value_chan.use_count()) {
-            // the value_chan is dead, end this coroutine
-            break;
-          }
-        }
-      }(chan, this->_potential_events));
-    };
-    auto touch = [this, &chan]() -> bool {
+  Selector& on(int key, Channel<T> chan, unsigned long long interval_ms = 1e5) {
+    this->_active_callbacks[key] = [this, chan]() mutable -> bool {
       std::optional<T> opt = chan.recv_nowait();
       if (opt.has_value()) {
-        this->_value = std::make_any<T>(std::move(*opt));
+        this->_active_value = std::make_any<T>(std::move(*opt));
         return true;
       }
       return false;
     };
-
-    this->_event_listeners[chan.id()] = listen;
-    if (this->_current_event != 0 && this->_current_event != chan.id()) {
-      // only check the channel whose id=this->_current_event
-      return false;
-    }
-    // try receive from target channel. Or try receive from every channel in first scan loop
-    return touch();
-  }
-
-  template <typename T>
-  bool test(Channel<T>& chan) {
-    ReadChannel<T> rchan(chan);
-    return this->test(rchan);
+    this->_listeners[key] = [this, key, chan, interval_ms]() {
+      cgo::spawn([](int key, ReadChannel<T> value_chan, Channel<int> notify_chan,
+                    std::shared_ptr<std::atomic<bool>> done_flag, unsigned long long interval_ms) -> Coroutine<void> {
+        while (true) {
+          if (co_await value_chan.test(interval_ms)) {
+            notify_chan.send_nowait(std::move(key));
+            break;
+          } else if (done_flag->load()) {
+            break;
+          }
+        }
+      }(key, chan, this->_active_chan, this->_done_flag, interval_ms));
+    };
+    return *this;
   }
 
   template <typename T>
   T cast() {
     if constexpr (std::is_same_v<T, std::any>) {
-      return std::move(this->_value);
+      return std::move(this->_active_value);
     }
-    return std::any_cast<T>(std::move(this->_value));
+    return std::any_cast<T>(std::move(this->_active_value));
   }
 
-  // return an acitavated channel's id
-  Coroutine<size_t> wait();
+  Coroutine<int> recv();
+  Coroutine<int> recv_or_default(int key);
 
  private:
-  std::any _value;
-  std::unordered_map<size_t, std::function<void()>> _event_listeners;
-  Channel<size_t> _potential_events;
-  size_t _current_event = 0;
+  std::unordered_map<int, std::function<void()>> _listeners;
+  std::unordered_map<int, std::function<bool()>> _active_callbacks;
+  Channel<int> _active_chan;
+  std::shared_ptr<std::atomic<bool>> _done_flag;
+  std::any _active_value;
 };
 
 // Make a channel for given coroutine object. When coroutine finish, the return value will be sent to tish channel.
