@@ -22,19 +22,23 @@ cgo::Coroutine<void> run_server() {
       cgo::spawn([](cgo::Socket conn) -> cgo::Coroutine<void> {
         cgo::Defer defer([&conn]() { conn.close(); });
 
-        cgo::Selector s;
-        s.on("recv"_u, cgo::collect(conn.recv(256)));
-        s.on("timeout"_u, cgo::Timer(10 * 1000).chan());
-        switch (co_await s.wait()) {
-          case "connect"_u: {
-            auto req = s.cast<std::string>();
-            co_await conn.send("echo from server: " + req);
-            break;
-          };
-          case "timeout"_u: {
-            printf("in server: conn{%d} recv timeout after 10 sec\n", conn.fileno());
-            break;
+        try {
+          cgo::Selector s;
+          s.on("recv"_u, cgo::collect(conn.recv(256)));
+          s.on("timeout"_u, cgo::Timer(10 * 1000).chan());
+          switch (co_await s.recv()) {
+            case "recv"_u: {
+              auto req = s.cast<std::string>();
+              co_await conn.send("echo from server: " + req);
+              break;
+            };
+            case "timeout"_u: {
+              printf("in server: conn{%d} recv timeout after 10 sec\n", conn.fileno());
+              break;
+            }
           }
+        } catch (const cgo::SocketException& e) {
+          printf("in server: %s\n", e.what());
         }
       }(c));
     } catch (const cgo::SocketException& e) {
@@ -51,9 +55,9 @@ cgo::Coroutine<void> run_client(int cli_id) {
       cgo::Defer defer([&conn]() { conn.close(); });
       {
         cgo::Selector s;
-        s.on("connect"_u, cgo::collect(client.connect("127.0.0.1", 8080)));
-        s.on("timeout"_u, cgo::Timer(timeout_ms).chan());
-        switch (co_await s.wait()) {
+        s.on("connect"_u, cgo::collect(conn.connect("127.0.0.1", 8080)));
+        s.on("timeout"_u, cgo::Timer(10 * 1000).chan());
+        switch (co_await s.recv()) {
           case "connect"_u: {
             break;
           };
@@ -67,9 +71,9 @@ cgo::Coroutine<void> run_client(int cli_id) {
       co_await conn.send(req);
       {
         cgo::Selector s;
-        s.on("recv"_u, cgo::collect(client.recv(256)));
+        s.on("recv"_u, cgo::collect(conn.recv(256)));
         s.on("timeout"_u, cgo::Timer(10 * 1000).chan());
-        switch (co_await s.wait()) {
+        switch (co_await s.recv()) {
           case "recv"_u: {
             auto rsp = s.cast<std::string>();
             co_await mtx.lock();

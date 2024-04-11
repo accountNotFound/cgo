@@ -1,3 +1,5 @@
+#pragma once
+
 #include "./event.h"
 #include "core/condition.h"
 
