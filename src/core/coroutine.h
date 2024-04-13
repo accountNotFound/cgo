@@ -38,10 +38,6 @@ class CoroutinePromise<void> : public CoroutinePromiseBase {
   void return_void() {}
 };
 
-}  // namespace cgo::_impl
-
-namespace cgo {
-
 class CoroutineBase {
  public:
   CoroutineBase(const CoroutineBase&) = delete;
@@ -58,8 +54,15 @@ class CoroutineBase {
   _impl::CoroutinePromiseBase* _promise = nullptr;
 };
 
+}  // namespace cgo::_impl
+
+namespace cgo {
+
 template <typename T>
-class Coroutine : public CoroutineBase {
+class Coroutine : public _impl::CoroutineBase {
+ public:
+  using type = T;
+
  public:
   class promise_type : public _impl::CoroutinePromise<T> {
    public:

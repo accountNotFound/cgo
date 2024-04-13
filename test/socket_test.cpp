@@ -2,7 +2,7 @@
 
 #include "cgo.h"
 
-const size_t exec_num = 4;
+const size_t exec_num = 1;
 const size_t cli_num = 1000, conn_num = 100;
 
 cgo::Mutex mtx;
@@ -13,7 +13,7 @@ cgo::Coroutine<void> run_server() {
   cgo::Defer defer([&server]() { server.close(); });
 
   server.bind(8080);
-  server.listen(1000);  // give a smaller backlog and you'll see timeout log printed in this test
+  server.listen(10);  // give a smaller backlog and you'll see timeout log printed in this test
   while (true) {
     try {
       cgo::Socket c = co_await server.accept();
@@ -23,25 +23,15 @@ cgo::Coroutine<void> run_server() {
         cgo::Defer defer([&conn]() { conn.close(); });
 
         try {
-          cgo::Selector s;
-          s.on("recv"_u, cgo::collect(conn.recv(256)));
-          s.on("timeout"_u, cgo::Timer(10 * 1000).chan());
-          switch (co_await s.recv()) {
-            case "recv"_u: {
-              auto req = s.cast<std::string>();
-              co_await conn.send("echo from server: " + req);
-              break;
-            };
-            case "timeout"_u: {
-              printf("in server: conn{%d} recv timeout after 10 sec\n", conn.fileno());
-              break;
-            }
-          }
+          auto req = co_await cgo::timeout([conn]() mutable { return conn.recv(256); }, 10 * 1000);
+          co_await conn.send("echo from server: " + req);
         } catch (const cgo::SocketException& e) {
           printf("in server: %s\n", e.what());
         }
       }(c));
     } catch (const cgo::SocketException& e) {
+      printf("in server: %s\n", e.what());
+    } catch (const cgo::TimeoutException& e) {
       printf("in server: %s\n", e.what());
     }
   }
@@ -53,42 +43,18 @@ cgo::Coroutine<void> run_client(int cli_id) {
     try {
       cgo::Socket conn;
       cgo::Defer defer([&conn]() { conn.close(); });
-      {
-        cgo::Selector s;
-        s.on("connect"_u, cgo::collect(conn.connect("127.0.0.1", 8080)));
-        s.on("timeout"_u, cgo::Timer(10 * 1000).chan());
-        switch (co_await s.recv()) {
-          case "connect"_u: {
-            break;
-          };
-          case "timeout"_u: {
-            printf("in client[%d]: conn{%d} connect timeout after 10 sec\n", cli_id, conn.fileno());
-            continue;
-          }
-        }
-      }
-      auto req = cgo::util::format("cli{%d} send data %d", cli_id, i);
-      co_await conn.send(req);
-      {
-        cgo::Selector s;
-        s.on("recv"_u, cgo::collect(conn.recv(256)));
-        s.on("timeout"_u, cgo::Timer(10 * 1000).chan());
-        switch (co_await s.recv()) {
-          case "recv"_u: {
-            auto rsp = s.cast<std::string>();
-            co_await mtx.lock();
-            end_num++;
-            mtx.unlock();
-            i++;
-            break;
-          };
-          case "timeout"_u: {
-            printf("in client[%d]: conn{%d} recv timeout after 10 sec\n", cli_id, conn.fileno());
-            continue;
-          }
-        }
-      }
+
+      co_await cgo::timeout([conn]() mutable { return conn.connect("127.0.0.1", 8080); }, 10 * 1000);
+      co_await conn.send(cgo::util::format("cli{%d} send data %d", cli_id, i));
+      auto rsp = co_await cgo::timeout([conn]() mutable { return conn.recv(256); }, 10 * 1000);
+      co_await mtx.lock();
+      end_num++;
+      i++;
+      mtx.unlock();
     } catch (const cgo::SocketException& e) {
+      ok = false;
+      printf("in client[%d]: %s\n", cli_id, e.what());
+    } catch (const cgo::TimeoutException& e) {
       ok = false;
       printf("in client[%d]: %s\n", cli_id, e.what());
     }

@@ -223,22 +223,4 @@ class Selector {
   std::any _active_value;
 };
 
-// Make a channel for given coroutine object. When coroutine finish, the return value will be sent to tish channel.
-// if coroutine return void, a const `nullptr` will be sent
-template <typename T, typename ChanT = std::conditional<std::is_same_v<T, void>, void*, T>::type>
-ReadChannel<ChanT> collect(Coroutine<T>&& target) {
-  Channel<ChanT> chan(1);
-  _impl::ScheduleTask task = [](Coroutine<T> target, Channel<ChanT> chan) -> Coroutine<void> {
-    if constexpr (std::is_same_v<T, void>) {
-      co_await target;
-      co_await chan.send(nullptr);
-    } else {
-      T res = co_await target;
-      co_await chan.send(std::move(res));
-    }
-  }(std::move(target), chan);
-  _impl::ScheduleContext::current->allocate(std::move(task));
-  return chan;
-}
-
 }  // namespace cgo

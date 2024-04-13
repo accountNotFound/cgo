@@ -4,7 +4,7 @@
 #include "../util/format.h"
 #undef USE_ASSERT
 
-namespace cgo {
+namespace cgo::_impl {
 
 CoroutineBase::CoroutineBase(CoroutineBase&& rhs) {
   if (this->_promise && !this->_promise->co_handler.done()) {
