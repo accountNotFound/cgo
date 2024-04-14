@@ -26,12 +26,14 @@ class Task {
 
   void resume() { this->_target->resume(); }
   bool done() { return this->_target->done(); }
+  void cancel(std::exception_ptr err) { this->_target->promise().co_frames->top()->error = err; }
+
   size_t id() const { return reinterpret_cast<size_t>(this->_target.get()); }
   bool operator==(const Task& rhs) const { return this->id() == rhs.id(); }
 
  public:
   std::function<void()> schedule_callback = nullptr;
-  long await_timeout_ms = -1;
+  int64_t await_timeout_ms = -1;
 
  private:
   std::unique_ptr<CoroutineBase> _target;
@@ -59,6 +61,11 @@ class Scheduler {
 
 namespace cgo {
 
-std::suspend_always yield();
+template <typename T>
+void spawn(Coroutine<T>&& target) {
+  _impl::Scheduler::current->allocate(_impl::Task(std::move(target)));
+}
+
+Coroutine<void> yield();
 
 }  // namespace cgo

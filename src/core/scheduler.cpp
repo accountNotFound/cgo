@@ -26,16 +26,17 @@ Task* Scheduler::get() {
 void Scheduler::put(Task* ptask) {
   std::unique_lock guard(this->_mutex);
   this->_ptask_runnings.push(ptask);
+  ptask->await_timeout_ms = -1;
 }
 
 }  // namespace cgo::_impl
 
 namespace cgo {
 
-std::suspend_always yield() {
+Coroutine<void> yield() {
   _impl::Task* ptask = _impl::Task::current;
   ptask->schedule_callback = [ptask]() { _impl::Scheduler::current->put(ptask); };
-  return {};
+  co_await std::suspend_always{};
 }
 
 }  // namespace cgo

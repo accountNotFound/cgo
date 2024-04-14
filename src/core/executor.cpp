@@ -4,11 +4,13 @@ namespace cgo::_impl {
 
 thread_local Scheduler* Scheduler::current = nullptr;
 thread_local Task* Task::current = nullptr;
+thread_local Timer* Timer::current = nullptr;
 
 void Executor::start(size_t worker_num) {
   for (int i = 0; i < worker_num; i++) {
     this->_workers.emplace_back(std::thread([this]() {
       Scheduler::current = this->_scheduler;
+      Timer::current = this->_timer;
 
       while (!this->_finish_flag) {
         Task* current = this->_scheduler->get();

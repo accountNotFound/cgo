@@ -24,7 +24,7 @@ class Condition {
   Condition(cgo::util::SpinLock& mutex) : _mutex(&mutex) {}
   void lock() { this->_mutex->lock(); }
   void unlock() { this->_mutex->unlock(); }
-  std::suspend_always wait();
+  Coroutine<void> wait(std::weak_ptr<void> ref);
   void notify();
   size_t size() const { return this->_ptask_waitings.size(); }
 
@@ -44,7 +44,7 @@ class Mutex {
   void unlock();
 
  private:
-  struct Member {
+  struct Member : public std::enable_shared_from_this<Member> {
     util::SpinLock mutex;
     _impl::Condition cond;
     bool lock_flag = false;
@@ -70,7 +70,7 @@ class Channel {
         co_return std::move(res);
       } else {
         _mptr->w_cond.notify();
-        co_await _mptr->r_cond.wait();
+        co_await _mptr->r_cond.wait(_mptr->weak_from_this());
       }
     }
   }
@@ -90,9 +90,21 @@ class Channel {
         _mptr->mutex.unlock();
         co_return;
       } else {
-        co_await _mptr->w_cond.wait();
+        co_await _mptr->w_cond.wait(_mptr->weak_from_this());
       }
     }
+  }
+
+  bool send_nowait(T&& value) {
+    std::unique_lock guard(_mptr->mutex);
+    bool ok1 = _mptr->capacity > 0 && _mptr->buffer.size() < _mptr->capacity;
+    bool ok2 = _mptr->capacity == 0 && _mptr->buffer.empty() && _mptr->r_cond.size() > 0;
+
+    if (!ok1 && !ok2) {
+      return false;
+    }
+    this->_do_send(std::move(value));
+    return true;
   }
 
  private:
@@ -108,7 +120,7 @@ class Channel {
   }
 
  private:
-  struct Member {
+  struct Member : public std::enable_shared_from_this<Member> {
     util::SpinLock mutex;
     _impl::Condition r_cond;
     _impl::Condition w_cond;
