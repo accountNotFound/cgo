@@ -12,6 +12,7 @@ namespace cgo {
 using cgo::Channel;
 using cgo::Coroutine;
 using cgo::Mutex;
+using cgo::Selector;
 using cgo::TimeoutException;
 using Defer = cgo::util::Defer;
 

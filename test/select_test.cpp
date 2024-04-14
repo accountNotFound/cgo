@@ -1,9 +1,7 @@
 #include <chrono>
 #include <string>
 
-#include "aio/atime.h"
-#include "core/condition.h"
-#include "core/executor.h"
+#include "cgo.h"
 
 // #define USE_DEBUG
 // #define USE_ASSERT
@@ -16,9 +14,15 @@ const size_t foo_loop = 10;
 cgo::Mutex mutex;
 size_t end_num = 0;
 
-cgo::ReadChannel<int> bar(unsigned long long timeout_ms) {
+constexpr unsigned int s2i(const char *s, std::size_t l, unsigned int h) {
+  return l == 0 ? h : s2i(s + 1, l - 1, (h * 33) + static_cast<unsigned char>(*s) - 'a' + 1);
+}
+
+constexpr unsigned int operator""_u(const char *s, std::size_t l) { return s2i(s, l, 0); }
+
+cgo::Channel<int> bar(int64_t timeout_ms) {
   cgo::Channel<int> res;
-  cgo::spawn([](cgo::Channel<int> chan, unsigned long long timeout_ms) -> cgo::Coroutine<void> {
+  cgo::spawn([](cgo::Channel<int> chan, int64_t timeout_ms) -> cgo::Coroutine<void> {
     co_await cgo::sleep(timeout_ms);
     co_await chan.send(timeout_ms);
   }(res, timeout_ms));
@@ -31,7 +35,7 @@ cgo::Coroutine<void> foo(std::string name) {
     s.on("bar_1"_u, bar(1000))
         .on("bar_2"_u, bar(2000))
         .on("bar_3"_u, bar(3000))
-        .on("timeout"_u, cgo::Timer(i < 3 ? 500 : 1500).chan())
+        .on("timeout"_u, bar(i < 3 ? 500 : 1500))
         .on("empty"_u, cgo::Channel<int>());
 
     switch ((co_await s.recv())) {
@@ -43,8 +47,8 @@ cgo::Coroutine<void> foo(std::string name) {
         break;
       }
       case "timeout"_u: {
-        void *res = s.cast<void *>();
-        DEBUG("%s select %p\n", name.data(), res);
+        auto v = s.cast<int>();
+        DEBUG("%s select %d\n", name.data(), v);
         break;
       }
       case "empty"_u: {
@@ -60,22 +64,25 @@ cgo::Coroutine<void> foo(std::string name) {
 }
 
 int main() {
-  cgo::_impl::ScheduleContext ctx;
-  cgo::_impl::EventHandler handler;
-  cgo::_impl::TaskExecutor exec(&ctx, &handler);
+  cgo::Context ctx;
 
-  exec.start(exec_num);
+  ctx.start(exec_num);
   for (int i = 0; i < foo_num; i++) {
     std::string name = "foo_" + std::to_string(i);
     cgo::spawn(foo(name));
   }
 
-  size_t target_num = foo_num;
-  while (end_num < target_num) {
-    handler.handle();
-  }
-  if (end_num != target_num) {
+  int prev_end_num = 0;
+  ctx.loop([&prev_end_num]() {
+    int target_num = foo_num;
+    if ((end_num - prev_end_num) * 10 > target_num) {
+      printf("progress: %lu/%d\n", end_num, target_num);
+      prev_end_num = end_num;
+    }
+    return end_num < target_num;
+  });
+  if (end_num != foo_num) {
     return -1;
   }
-  exec.stop();
+  ctx.stop();
 }

@@ -43,11 +43,13 @@ namespace cgo {
 
 Coroutine<void> sleep(int64_t timeout_ms);
 
-// throw cgo::TimeoutException if timeout. Only works when coroutine finally await on cgo::_impl::Condition
+// throw cgo::TimeoutException if timeout. Only works when coroutine finally await on cgo::_impl::Condition. So do all
+// built-in types and functions.
 template <typename T>
 Coroutine<T> timeout(Coroutine<T>&& target, int64_t timeout_ms) {
-  _impl::Task::current->await_timeout_ms = timeout_ms;
-  util::Defer defer([]() { _impl::Task::current->await_timeout_ms = -1; });
+  _impl::Task* current = _impl::Task::current;
+  current->await_timeout_ms = timeout_ms;
+  util::Defer defer([current]() { current->await_timeout_ms = -1; });
 
   if constexpr (std::is_same_v<T, void>) {
     co_await target;

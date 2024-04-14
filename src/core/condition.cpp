@@ -81,4 +81,33 @@ void Mutex::unlock() {
   _mptr->cond.notify();
 }
 
+Coroutine<int> Selector::recv() {
+  for (auto& [_, listen] : this->_listeners) {
+    listen();
+  }
+  while (true) {
+    int key = co_await this->_active_keys.recv();
+    if (this->_active_callbacks[key]()) {
+      this->_done_flag->store(true);
+      co_return std::move(key);
+    } else {
+      this->_listeners[key]();
+    }
+  }
+}
+
+Coroutine<int> Selector::recv_or_default(int key) {
+  for (auto& [_, listen] : this->_listeners) {
+    listen();
+  }
+  std::optional<int> opt = this->_active_keys.recv_nowait();
+  if (opt.has_value() && this->_active_callbacks[*opt]()) {
+    this->_done_flag->store(true);
+    co_return std::move(*opt);
+  } else {
+    this->_done_flag->store(true);
+    co_return std::move(key);
+  }
+}
+
 }  // namespace cgo
