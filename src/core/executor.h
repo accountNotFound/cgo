@@ -3,23 +3,20 @@
 #include <thread>
 #include <vector>
 
-#include "./context.h"
+#include "./scheduler.h"
 
 namespace cgo::_impl {
 
-class EventHandler;
-
-class TaskExecutor {
+class Executor {
  public:
-  TaskExecutor(ScheduleContext* context, EventHandler* handler) : _context(context), _handler(handler) {}
+  Executor(Scheduler* scheduler) : _scheduler(scheduler) {}
   void start(size_t worker_num);
   void stop();
 
  private:
   bool _finish_flag = false;
   std::vector<std::thread> _workers;
-  ScheduleContext* _context;
-  EventHandler* _handler;
+  Scheduler* _scheduler;
 };
 
 }  // namespace cgo::_impl

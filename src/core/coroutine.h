@@ -46,12 +46,13 @@ class CoroutineBase {
   void start();
   void resume();
   bool done();
+  CoroutinePromiseBase& promise() const { return *this->_promise; }
 
  protected:
-  CoroutineBase(_impl::CoroutinePromiseBase* p) : _promise(p) {}
+  CoroutineBase(CoroutinePromiseBase* p) : _promise(p) {}
 
  protected:
-  _impl::CoroutinePromiseBase* _promise = nullptr;
+  CoroutinePromiseBase* _promise = nullptr;
 };
 
 }  // namespace cgo::_impl

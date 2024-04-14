@@ -10,7 +10,7 @@ enable_testing()
 
 add_subdirectory("src/core")
 add_subdirectory("src/util")
-add_subdirectory("src/aio")
+# add_subdirectory("src/aio")
 add_subdirectory("test")
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})

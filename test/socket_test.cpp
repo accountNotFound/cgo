@@ -2,7 +2,7 @@
 
 #include "cgo.h"
 
-const size_t exec_num = 1;
+const size_t exec_num = 4;
 const size_t cli_num = 1000, conn_num = 100;
 
 cgo::Mutex mtx;
@@ -13,7 +13,7 @@ cgo::Coroutine<void> run_server() {
   cgo::Defer defer([&server]() { server.close(); });
 
   server.bind(8080);
-  server.listen(10);  // give a smaller backlog and you'll see timeout log printed in this test
+  server.listen(1000);  // give a smaller backlog and you'll see timeout log printed in this test
   while (true) {
     try {
       cgo::Socket c = co_await server.accept();
