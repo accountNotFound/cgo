@@ -12,12 +12,12 @@
 
 namespace cgo::_impl {
 
-class Timer {
+class TimeHandler {
  public:
-  static thread_local Timer* current;
+  static thread_local TimeHandler* current;
 
  public:
-  Timer() { Timer::current = this; }
+  TimeHandler() { TimeHandler::current = this; }
   void add(std::function<void()>&& func, int64_t timeout_ms);
   void handle(int64_t timeout_ms = 50);
   void loop(const std::function<bool()>& pred, int64_t timeout_interval_ms = 50);
@@ -43,8 +43,8 @@ namespace cgo {
 
 Coroutine<void> sleep(int64_t timeout_ms);
 
-// throw cgo::TimeoutException if timeout. Only works when coroutine finally await on cgo::_impl::Condition. So do all
-// built-in types and functions.
+// throw cgo::TimeoutException if timeout. Only works when coroutine finally await on cgo::_impl::Condition. All builtin
+// functions and classes support this operation
 template <typename T>
 Coroutine<T> timeout(Coroutine<T>&& target, int64_t timeout_ms) {
   _impl::Task* current = _impl::Task::current;
@@ -53,8 +53,11 @@ Coroutine<T> timeout(Coroutine<T>&& target, int64_t timeout_ms) {
 
   if constexpr (std::is_same_v<T, void>) {
     co_await target;
+    // TODO: cancel corresponding timer
   } else {
-    co_return co_await target;
+    T res = co_await target;
+    // TODO: cancel corresponding timer
+    co_return std::move(res);
   }
 }
 

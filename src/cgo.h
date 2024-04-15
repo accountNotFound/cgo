@@ -28,18 +28,18 @@ extern Coroutine<T> timeout(Coroutine<T>&& target, int64_t timeout_ms);
 
 class Context {
  public:
-  Context() : _executor(_scheduler, _timer) {}
+  Context() : _executor(_scheduler, _time_handler) {}
   Context(const Context&) = delete;
   Context(Context&&) = delete;
 
   void start(size_t exec_num) { this->_executor.start(exec_num); }
   void stop() { this->_executor.stop(); }
-  void loop(const std::function<bool()>& pred) { this->_timer.loop(pred); }
+  void loop(const std::function<bool()>& pred) { this->_time_handler.loop(pred); }
 
  private:
   _impl::Scheduler _scheduler;
   _impl::Executor _executor;
-  _impl::Timer _timer;
+  _impl::TimeHandler _time_handler;
 };
 
 }  // namespace cgo

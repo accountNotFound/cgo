@@ -31,7 +31,7 @@ Coroutine<void> Condition::wait(std::weak_ptr<void> weak_owner) {
     this->_mutex->unlock();
   };
   if (current->await_timeout_ms != -1) {
-    Timer::current->add(
+    TimeHandler::current->add(
         [current, this, weak_owner]() mutable {
           auto shared_owner = weak_owner.lock();
           if (!shared_owner) {

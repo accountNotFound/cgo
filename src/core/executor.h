@@ -10,7 +10,7 @@ namespace cgo::_impl {
 
 class Executor {
  public:
-  Executor(Scheduler& scheduler, Timer& timer) : _scheduler(&scheduler), _timer(&timer) {}
+  Executor(Scheduler& scheduler, TimeHandler& time_handler) : _scheduler(&scheduler), _time_handler(&time_handler) {}
   void start(size_t worker_num);
   void stop();
 
@@ -18,7 +18,7 @@ class Executor {
   bool _finish_flag = false;
   std::vector<std::thread> _workers;
   Scheduler* _scheduler;
-  Timer* _timer;
+  TimeHandler* _time_handler;
 };
 
 }  // namespace cgo::_impl

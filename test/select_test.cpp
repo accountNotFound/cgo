@@ -4,7 +4,7 @@
 #include "cgo.h"
 
 // #define USE_DEBUG
-// #define USE_ASSERT
+#define USE_ASSERT
 #include "util/format.h"
 
 const size_t exec_num = 4;
