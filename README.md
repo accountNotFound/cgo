@@ -75,6 +75,7 @@ cgo::Coroutine<void> server() {
   server.bind(8080);
   server.listen(1000);  
   cgo::Socket conn = co_await server.accept();
+  cgo::Defer defer([&conn]() { conn.close(); });
 
   int64_t recv_timeout_ms = 10*1000;
   try {

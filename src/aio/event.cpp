@@ -82,9 +82,7 @@ size_t EventHandler::handle(size_t handle_batch, size_t timeout_ms) {
     std::unique_lock guard(this->_mutex);
     if (this->_callbacks.contains(fd)) {
       DEBUG("notify fd{%d}, event=%lu\n", fd, size_t(ev));
-      this->_mutex.unlock();
       this->_callbacks[fd](ev);
-      this->_mutex.lock();
     }
   }
   return active_num;
