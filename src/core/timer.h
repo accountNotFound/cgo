@@ -20,7 +20,7 @@ class TimeHandler {
   TimeHandler();
 
   void add(std::function<void()>&& func, int64_t timeout_ms);
-  void handle(size_t batch_size = 128, int64_t timeout_ms = 50);
+  size_t handle(size_t batch_size = 128, int64_t timeout_ms = 50);
   void loop(const std::function<bool()>& pred);
 
  private:
@@ -62,5 +62,16 @@ Coroutine<T> timeout(Coroutine<T>&& target, int64_t timeout_ms) {
     co_return std::move(res);
   }
 }
+
+class TimeoutException : public std::exception {
+ public:
+  TimeoutException(int64_t timeout_ms)
+      : _timeout_ms(timeout_ms), _msg("timeout after " + std::to_string(timeout_ms) + "ms") {}
+  const char* what() const noexcept { return this->_msg.data(); }
+
+ private:
+  int64_t _timeout_ms;
+  std::string _msg;
+};
 
 }  // namespace cgo

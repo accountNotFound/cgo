@@ -1,16 +1,20 @@
 #include "./executor.h"
 
+#include "../aio/event.h"
+
 namespace cgo::_impl {
 
-thread_local Scheduler* Scheduler::current = nullptr;
 thread_local Task* Task::current = nullptr;
+thread_local Scheduler* Scheduler::current = nullptr;
 thread_local TimeHandler* TimeHandler::current = nullptr;
+thread_local EventHandler* EventHandler::current = nullptr;
 
 void Executor::start(size_t worker_num) {
   for (int i = 0; i < worker_num; i++) {
     this->_workers.emplace_back(std::thread([this]() {
       Scheduler::current = this->_scheduler;
       TimeHandler::current = this->_time_handler;
+      EventHandler::current = this->_event_handler;
 
       while (!this->_finish_flag) {
         Task* current = this->_scheduler->get();

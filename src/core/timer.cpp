@@ -15,7 +15,7 @@ void TimeHandler::add(std::function<void()>&& func, int64_t timeout_ms) {
   this->_delay_pq.emplace(std::move(task));
 }
 
-void TimeHandler::handle(size_t batch_size, int64_t timeout_ms) {
+size_t TimeHandler::handle(size_t batch_size, int64_t timeout_ms) {
   std::unique_lock guard(this->_mutex);
   auto now = std::chrono::steady_clock::now();
   if (this->_delay_pq.empty()) {
@@ -26,13 +26,19 @@ void TimeHandler::handle(size_t batch_size, int64_t timeout_ms) {
     this->_cond.wait_for(
         guard, std::chrono::duration_cast<std::chrono::milliseconds>(this->_delay_pq.top().expired_time - now));
   }
-  for (int i = 0; i < batch_size && !this->_delay_pq.empty(); i++) {
+  size_t active_num = 0;
+
+  for (; active_num < batch_size && !this->_delay_pq.empty(); active_num++) {
+    if (std::chrono::steady_clock::now() < this->_delay_pq.top().expired_time) {
+      break;
+    }
     auto [expired_time, callback] = std::move(this->_delay_pq.top());
     this->_delay_pq.pop();
     this->_mutex.unlock();
     callback();
     this->_mutex.lock();
   }
+  return active_num;
 }
 
 void TimeHandler::loop(const std::function<bool()>& pred) {
