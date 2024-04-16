@@ -1,5 +1,4 @@
-#include "aio/atime.h"
-#include "core/executor.h"
+#include "cgo.h"
 
 const size_t exec_num = 4;
 const size_t foo_num = 10000;
@@ -17,23 +16,39 @@ cgo::Coroutine<void> foo(std::string name) {
   mutex.unlock();
 }
 
-int main() {
-  cgo::_impl::ScheduleContext ctx;
-  cgo::_impl::EventHandler handler;
-  cgo::_impl::TaskExecutor exec(&ctx, &handler);
+cgo::Coroutine<void> foo2(std::string name) {
+  for (int i = 0; i < foo_loop; i++) {
+    try {
+      co_await cgo::timeout(cgo::sleep(1000), 100);
+    } catch (const cgo::TimeoutException& e) {
+      ;
+    }
+  }
+  co_await mutex.lock();
+  end_num++;
+  mutex.unlock();
+}
 
-  exec.start(exec_num);
+int main() {
+  cgo::Context ctx;
+
+  ctx.start(exec_num);
   for (int i = 0; i < foo_num; i++) {
     std::string name = "foo_" + std::to_string(i);
     cgo::spawn(foo(name));
   }
 
-  size_t target_num = foo_num;
-  while (end_num < target_num) {
-    handler.handle();
-  }
-  if (end_num != target_num) {
+  int prev_end_num = 0;
+  ctx.loop([&prev_end_num]() {
+    int target_num = foo_num;
+    if ((end_num - prev_end_num) * 10 > target_num) {
+      printf("progress: %lu/%d\n", end_num, target_num);
+      prev_end_num = end_num;
+    }
+    return end_num < target_num;
+  });
+  if (end_num != foo_num) {
     return -1;
   }
-  exec.stop();
+  ctx.stop();
 }

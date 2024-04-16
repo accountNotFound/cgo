@@ -1,6 +1,6 @@
 #include "./event.h"
 
-#include "core/condition.h"
+#include "../core/condition.h"
 
 // #define USE_DEBUG
 #include "util/format.h"
@@ -40,7 +40,6 @@ EventHandler::EventHandler() {
 }
 
 void EventHandler::add(Fd fd, Event on, std::function<void(Event)>&& callback) {
-  // ContextBase::this_handler = this;
 #if defined(linux) || defined(__linux) || defined(__linux__)
   std::unique_lock guard(this->_mutex);
   ::epoll_event ev;
@@ -83,11 +82,19 @@ size_t EventHandler::handle(size_t handle_batch, size_t timeout_ms) {
     std::unique_lock guard(this->_mutex);
     if (this->_callbacks.contains(fd)) {
       DEBUG("notify fd{%d}, event=%lu\n", fd, size_t(ev));
+      this->_mutex.unlock();
       this->_callbacks[fd](ev);
+      this->_mutex.lock();
     }
   }
   return active_num;
 #endif
+}
+
+void EventHandler::loop(const std::function<bool()>& pred) {
+  while (pred()) {
+    this->handle();
+  }
 }
 
 }  // namespace cgo::_impl

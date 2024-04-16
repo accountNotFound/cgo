@@ -4,7 +4,7 @@
 #include "../util/format.h"
 #undef USE_ASSERT
 
-namespace cgo {
+namespace cgo::_impl {
 
 CoroutineBase::CoroutineBase(CoroutineBase&& rhs) {
   if (this->_promise && !this->_promise->co_handler.done()) {
@@ -31,6 +31,10 @@ void CoroutineBase::resume() {
   ASSERT(this->_promise->co_frames && !this->_promise->co_frames->empty(),
          "invalid coroutine resume, maybe it is not started, this=%p", this);
   auto f = this->_promise->co_frames->top();
+  if (f->error) {
+    this->_promise->co_frames->pop();
+    f = this->_promise->co_frames->top();
+  }
   f->co_handler.resume();
   if (f->co_handler.done() || f->error) {
     this->_promise->co_frames->pop();
@@ -42,4 +46,4 @@ void CoroutineBase::resume() {
 
 bool CoroutineBase::done() { return this->_promise->co_handler.done(); }
 
-}  // namespace cgo
+}  // namespace cgo::_impl

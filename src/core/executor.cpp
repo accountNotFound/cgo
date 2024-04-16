@@ -1,21 +1,23 @@
 #include "./executor.h"
 
-#include "aio/event.h"
+#include "../aio/event.h"
 
 namespace cgo::_impl {
 
-thread_local ScheduleContext* ScheduleContext::current = nullptr;
-thread_local ScheduleTask* ScheduleTask::current = nullptr;
+thread_local Task* Task::current = nullptr;
+thread_local Scheduler* Scheduler::current = nullptr;
+thread_local TimeHandler* TimeHandler::current = nullptr;
 thread_local EventHandler* EventHandler::current = nullptr;
 
-void TaskExecutor::start(size_t worker_num) {
+void Executor::start(size_t worker_num) {
   for (int i = 0; i < worker_num; i++) {
     this->_workers.emplace_back(std::thread([this]() {
-      ScheduleContext::current = this->_context;
-      EventHandler::current = this->_handler;
+      Scheduler::current = this->_scheduler;
+      TimeHandler::current = this->_time_handler;
+      EventHandler::current = this->_event_handler;
 
       while (!this->_finish_flag) {
-        ScheduleTask* current = this->_context->get();
+        Task* current = this->_scheduler->get();
         if (!current) {
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
           continue;
@@ -23,22 +25,22 @@ void TaskExecutor::start(size_t worker_num) {
           current->schedule_callback = nullptr;
         }
 
-        ScheduleTask::current->current = current;
+        Task::current = current;
         while (!current->done() && !current->schedule_callback) {
           current->resume();
         }
         if (current->done()) {
-          this->_context->destroy(current);
+          this->_scheduler->destroy(current);
         } else {
           current->schedule_callback();
         }
-        ScheduleTask::current = nullptr;
+        Task::current = nullptr;
       }
     }));
   }
 }
 
-void TaskExecutor::stop() {
+void Executor::stop() {
   this->_finish_flag = true;
   for (auto& w : this->_workers) {
     if (w.joinable()) {

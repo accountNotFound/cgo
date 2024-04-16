@@ -1,11 +1,8 @@
-#include "core/condition.h"
-
 #include <chrono>
 #include <string>
 
-#include "core/executor.h"
-
 // #define USE_DEBUG
+#include "cgo.h"
 #include "util/format.h"
 
 const size_t exec_num = 4;
@@ -26,10 +23,9 @@ cgo::Coroutine<void> foo(std::string name) {
 }
 
 int main() {
-  cgo::_impl::ScheduleContext ctx;
-  cgo::_impl::TaskExecutor exec(&ctx, nullptr);
+  cgo::Context ctx;
 
-  exec.start(exec_num);
+  ctx.start(exec_num);
   for (int i = 0; i < foo_num; i++) {
     std::string name = "foo_" + std::to_string(i);
     cgo::spawn(foo(name));
@@ -43,5 +39,5 @@ int main() {
   if (end_num != target_num) {
     return -1;
   }
-  exec.stop();
+  ctx.stop();
 }

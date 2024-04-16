@@ -1,12 +1,13 @@
 #pragma once
 
 #include "./event.h"
+#include "core/coroutine.h"
 #include "core/condition.h"
 
 namespace cgo {
 
 // only TCP and IPV4 are supported now. You should explicitly call `close()` if you don't use the socket anymore
-class Socket : public ReferenceType {
+class Socket {
  public:
   Socket();
 

@@ -40,7 +40,8 @@ class EventHandler {
   void add(Fd fd, Event ev, std::function<void(Event)>&& callback);
   void mod(Fd fd, Event ev);
   void del(Fd fd);
-  auto handle(size_t handle_batch = 128, size_t timeout_ms = 50) -> size_t;
+  size_t handle(size_t handle_batch = 128, size_t timeout_ms = 50);
+  void loop(const std::function<bool()>& pred);
 
  public:
   static thread_local EventHandler* current;

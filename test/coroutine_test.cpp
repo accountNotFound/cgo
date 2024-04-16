@@ -1,4 +1,4 @@
-#include "core/coroutine.h"
+#include "cgo.h"
 
 #include <stdio.h>
 

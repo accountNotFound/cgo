@@ -49,9 +49,10 @@ cgo::Coroutine<void> select() {
 
   {
     // suggest to destroy selector immediately when case-switch done
+    // the Selector::on() only support int type as key, but you can write following code by User-Defined-Literal
     cgo::Selector s;
     s.on("empty_ichan"_u, ichan)
-    .on("schan_after_1_sec"_u, schan);
+     .on("schan_after_1_sec"_u, schan);
     switch ((co_await s.recv())) {
       case "empty_ichan"_u: {
         // never be here
@@ -74,7 +75,14 @@ cgo::Coroutine<void> server() {
   server.bind(8080);
   server.listen(1000);  
   cgo::Socket conn = co_await server.accept();
-  std::string req = co_await conn.recv(256);
+
+  int64_t recv_timeout_ms = 10*1000;
+  try {
+    std::string req = co_await cgo::timeout(conn.recv(256), recv_timeout_ms);
+  } catch (const cgo::TimeoutException& e) {
+    printf("recv timeout\n");
+    co_return;
+  }
   co_await conn.send("service end");
 }
 ```

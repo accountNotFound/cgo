@@ -1,17 +1,18 @@
 #include "./condition.h"
 
-#include "aio/atime.h"
+#include "./error.h"
+#include "./timer.h"
 
 namespace cgo::_impl {
 
-void WaitingSet::put(ScheduleTask* ptask) {
+void WaitingSet::put(Task* ptask) {
   if (!this->_ptask_waiting_hash.contains(ptask)) {
     this->_ptask_waiting_list.push_back(ptask);
     this->_ptask_waiting_hash[ptask] = --this->_ptask_waiting_list.end();
   }
 }
 
-ScheduleTask* WaitingSet::pop(ScheduleTask* ptask) {
+Task* WaitingSet::pop(Task* ptask) {
   if (!ptask && !this->_ptask_waiting_hash.empty()) {
     ptask = this->_ptask_waiting_list.front();
   }
@@ -23,34 +24,37 @@ ScheduleTask* WaitingSet::pop(ScheduleTask* ptask) {
   return nullptr;
 }
 
-std::suspend_always Condition::wait(size_t index, unsigned long long timeout_ms) {
-  ScheduleTask* current = ScheduleTask::current;
-  current->schedule_callback = [this, current, index, timeout_ms]() {
-    this->_waiting_sets[index].put(current);
-
-    if (timeout_ms > 0) {
-      cgo::spawn([](std::shared_ptr<Condition> this_, ScheduleTask* current, size_t index,
-                    unsigned long long timeout_ms) -> Coroutine<void> {
-        co_await cgo::sleep(timeout_ms);
-        {
-          std::unique_lock guard(*this_);
-          current = this_->_waiting_sets[index].pop(current);
-        }
-        if (current) {
-          ScheduleContext::current->put(current);
-        }
-      }(this->shared_from_this(), current, index, timeout_ms));
-    }
-
-    this->_mutex.unlock();
+Coroutine<void> Condition::wait(std::weak_ptr<void> weak_owner) {
+  Task* current = Task::current;
+  current->schedule_callback = [this, current]() {
+    this->_ptask_waitings.put(current);
+    this->_mutex->unlock();
   };
-  return {};
+  if (current->await_timeout_ms != -1) {
+    TimeHandler::current->add(
+        [current, this, weak_owner]() mutable {
+          auto shared_owner = weak_owner.lock();
+          if (!shared_owner) {
+            return;
+          }
+          {
+            std::unique_lock guard(*this);
+            current = this->_ptask_waitings.pop(current);
+          }
+          if (current) {
+            current->cancel(std::make_exception_ptr(TimeoutException(current->await_timeout_ms)));
+            Scheduler::current->put(current);
+          }
+        },
+        current->await_timeout_ms);
+  }
+  co_await std::suspend_always{};
 }
 
-void Condition::notify(size_t index) {
-  ScheduleTask* ptask = this->_waiting_sets[index].pop();
+void Condition::notify() {
+  Task* ptask = this->_ptask_waitings.pop();
   if (ptask) {
-    ScheduleContext::current->put(ptask);
+    Scheduler::current->put(ptask);
   }
 }
 
@@ -60,21 +64,21 @@ namespace cgo {
 
 Coroutine<void> Mutex::lock() {
   while (true) {
-    this->_cond->lock();
-    if (*this->_lock_flag) {
-      co_await this->_cond->wait(0);
+    _mptr->cond.lock();
+    if (_mptr->lock_flag) {
+      co_await _mptr->cond.wait(_mptr->weak_from_this());
     } else {
-      *this->_lock_flag = true;
-      this->_cond->unlock();
+      _mptr->lock_flag = true;
+      _mptr->cond.unlock();
       break;
     }
   }
 }
 
 void Mutex::unlock() {
-  std::unique_lock guard(*this->_cond);
-  *this->_lock_flag = false;
-  this->_cond->notify(0);
+  std::unique_lock guard(_mptr->cond);
+  _mptr->lock_flag = false;
+  _mptr->cond.notify();
 }
 
 Coroutine<int> Selector::recv() {
@@ -82,7 +86,7 @@ Coroutine<int> Selector::recv() {
     listen();
   }
   while (true) {
-    int key = co_await this->_active_chan.recv();
+    int key = co_await this->_active_keys.recv();
     if (this->_active_callbacks[key]()) {
       this->_done_flag->store(true);
       co_return std::move(key);
@@ -96,7 +100,7 @@ Coroutine<int> Selector::recv_or_default(int key) {
   for (auto& [_, listen] : this->_listeners) {
     listen();
   }
-  std::optional<int> opt = this->_active_chan.recv_nowait();
+  std::optional<int> opt = this->_active_keys.recv_nowait();
   if (opt.has_value() && this->_active_callbacks[*opt]()) {
     this->_done_flag->store(true);
     co_return std::move(*opt);

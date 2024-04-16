@@ -177,6 +177,7 @@ void Socket::close() {
     _impl::EventHandler::current->del(this->_fd);
     ::close(this->_fd);
     this->_fd = 0;
+    // this->_chan.send_nowait(Event::ERR);
   }
 }
 
