@@ -4,16 +4,30 @@
 
 namespace cgo::_impl {
 
+TimeHandler::TimeHandler() { TimeHandler::current = this; }
+
 void TimeHandler::add(std::function<void()>&& func, int64_t timeout_ms) {
   std::unique_lock guard(this->_mutex);
-  this->_delay_pq.emplace(std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms), std::move(func));
+  DelayTask task{std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms), std::move(func)};
+  if (!this->_delay_pq.empty() && task < this->_delay_pq.top()) {
+    this->_cond.notify_one();
+  }
+  this->_delay_pq.emplace(std::move(task));
 }
 
-void TimeHandler::handle(int64_t timeout_ms) {
+void TimeHandler::handle(size_t batch_size, int64_t timeout_ms) {
   std::unique_lock guard(this->_mutex);
-  this->_cond.wait_for(guard, std::chrono::milliseconds(timeout_ms));
-  while (!this->_delay_pq.empty() && std::chrono::steady_clock::now() >= this->_delay_pq.top().expired_time) {
-    auto [_, callback] = std::move(this->_delay_pq.top());
+  auto now = std::chrono::steady_clock::now();
+  if (this->_delay_pq.empty()) {
+    this->_cond.wait_for(guard, std::chrono::milliseconds(timeout_ms));
+  } else if (now + std::chrono::milliseconds(timeout_ms) < this->_delay_pq.top().expired_time) {
+    this->_cond.wait_for(guard, std::chrono::milliseconds(timeout_ms));
+  } else {
+    this->_cond.wait_for(
+        guard, std::chrono::duration_cast<std::chrono::milliseconds>(this->_delay_pq.top().expired_time - now));
+  }
+  for (int i = 0; i < batch_size && !this->_delay_pq.empty(); i++) {
+    auto [expired_time, callback] = std::move(this->_delay_pq.top());
     this->_delay_pq.pop();
     this->_mutex.unlock();
     callback();
@@ -21,9 +35,9 @@ void TimeHandler::handle(int64_t timeout_ms) {
   }
 }
 
-void TimeHandler::loop(const std::function<bool()>& pred, int64_t timeout_interval_ms) {
+void TimeHandler::loop(const std::function<bool()>& pred) {
   while (pred()) {
-    this->handle(timeout_interval_ms);
+    this->handle();
   }
 }
 

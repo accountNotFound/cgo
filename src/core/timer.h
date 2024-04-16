@@ -17,10 +17,11 @@ class TimeHandler {
   static thread_local TimeHandler* current;
 
  public:
-  TimeHandler() { TimeHandler::current = this; }
+  TimeHandler();
+
   void add(std::function<void()>&& func, int64_t timeout_ms);
-  void handle(int64_t timeout_ms = 50);
-  void loop(const std::function<bool()>& pred, int64_t timeout_interval_ms = 50);
+  void handle(size_t batch_size = 128, int64_t timeout_ms = 50);
+  void loop(const std::function<bool()>& pred);
 
  private:
   struct DelayTask {
@@ -28,12 +29,13 @@ class TimeHandler {
     std::function<void()> callback;
 
     bool operator>(const DelayTask& rhs) const { return this->expired_time > rhs.expired_time; }
+    bool operator<(const DelayTask& rhs) const { return this->expired_time < rhs.expired_time; }
+    bool operator==(const DelayTask& rhs) const { return this->expired_time == rhs.expired_time; }
   };
 
-  std::mutex _mutex;
-  std::condition_variable _cond;
-  // TODO: optimize with event handler
-
+ private:
+  cgo::util::SpinLock _mutex;
+  std::condition_variable_any _cond;
   std::priority_queue<DelayTask, std::vector<DelayTask>, std::greater<DelayTask>> _delay_pq;
 };
 
