@@ -49,6 +49,7 @@ Coroutine<void> Condition::wait(std::weak_ptr<void> weak_owner) {
         current->await_timeout_ms);
   }
   co_await std::suspend_always{};
+  this->_mutex->lock();
 }
 
 void Condition::notify() {
@@ -63,14 +64,13 @@ void Condition::notify() {
 namespace cgo {
 
 Coroutine<void> Mutex::lock() {
+  std::unique_lock guard(_mptr->mutex);
   while (true) {
-    _mptr->cond.lock();
     if (_mptr->lock_flag) {
       co_await _mptr->cond.wait(_mptr->weak_from_this());
     } else {
       _mptr->lock_flag = true;
-      _mptr->cond.unlock();
-      break;
+      co_return;
     }
   }
 }

@@ -26,7 +26,10 @@ class Condition {
   Condition(cgo::util::SpinLock& mutex) : _mutex(&mutex) {}
   void lock() { this->_mutex->lock(); }
   void unlock() { this->_mutex->unlock(); }
-  Coroutine<void> wait(std::weak_ptr<void> ref);
+
+  // Arguments:
+  // owner: object of this condition and mutex belongs to. Owner object should be managed by shared_ptr
+  Coroutine<void> wait(std::weak_ptr<void> owner);
   void notify();
   size_t size() const { return this->_ptask_waitings.size(); }
 
@@ -66,11 +69,10 @@ class Channel {
   Channel(size_t capacity = 0) : _mptr(std::make_shared<Member>(capacity)) {}
 
   Coroutine<T> recv() {
+    std::unique_lock guard(_mptr->mutex);
     while (true) {
-      _mptr->mutex.lock();
       if (_mptr->buffer.size() > 0) {
         T res = this->_do_recv();
-        _mptr->mutex.unlock();
         co_return std::move(res);
       } else {
         _mptr->w_cond.notify();
@@ -80,8 +82,8 @@ class Channel {
   }
 
   Coroutine<void> send(T&& value) {
+    std::unique_lock guard(_mptr->mutex);
     while (true) {
-      _mptr->mutex.lock();
 
       // has buffer and not full
       bool ok1 = _mptr->capacity > 0 && _mptr->buffer.size() < _mptr->capacity;
@@ -91,7 +93,6 @@ class Channel {
 
       if (ok1 || ok2) {
         this->_do_send(std::move(value));
-        _mptr->mutex.unlock();
         co_return;
       } else {
         co_await _mptr->w_cond.wait(_mptr->weak_from_this());
@@ -100,15 +101,10 @@ class Channel {
   }
 
   Coroutine<bool> test() {
-    auto lock_and_test = [this]() {
-      _mptr->mutex.lock();
-      return !_mptr->buffer.empty();
-    };
-
+    std::unique_lock guard(_mptr->mutex);
     for (int i = 0; i < 2; i++) {
-      if (lock_and_test()) {
+      if (!_mptr->buffer.empty()) {
         _mptr->r_cond.notify();
-        _mptr->mutex.unlock();
         co_return true;
       } else {
         _mptr->w_cond.notify();
