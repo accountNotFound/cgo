@@ -78,10 +78,17 @@ class Coroutine : public _impl::CoroutineBase {
 
   bool await_ready() { return this->done(); }
 
-  template <typename PromiseType>
-    requires std::is_base_of_v<_impl::CoroutinePromiseBase, PromiseType>
-  void await_suspend(std::coroutine_handle<PromiseType> caller) {
-    this->_promise->co_frames = caller.promise().co_frames;
+  // template <typename PromiseType>
+  //   requires std::is_base_of_v<_impl::CoroutinePromiseBase, PromiseType>
+  // void await_suspend(std::coroutine_handle<PromiseType> caller) {
+  //   this->_promise->co_frames = caller.promise().co_frames;
+  //   this->_promise->co_frames->push(this->_promise);
+  // }
+
+  void await_suspend(std::coroutine_handle<> caller) {
+    _impl::CoroutinePromiseBase& promise =
+        std::coroutine_handle<_impl::CoroutinePromiseBase>::from_address(caller.address()).promise();
+    this->_promise->co_frames = promise.co_frames;
     this->_promise->co_frames->push(this->_promise);
   }
 

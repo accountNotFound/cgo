@@ -23,7 +23,7 @@ class WaitingSet {
 
 class Condition {
  public:
-  Condition(cgo::util::SpinLock& mutex) : _mutex(&mutex) {}
+  Condition(cgo::util::SpinLock* mutex) : _mutex(mutex) {}
   void lock() { this->_mutex->lock(); }
   void unlock() { this->_mutex->unlock(); }
 
@@ -55,7 +55,7 @@ class Mutex {
     _impl::Condition cond;
     bool lock_flag = false;
 
-    Member() : mutex(), cond(mutex) {}
+    Member() : mutex(), cond(&mutex) {}
   };
 
  private:
@@ -84,7 +84,6 @@ class Channel {
   Coroutine<void> send(T&& value) {
     std::unique_lock guard(_mptr->mutex);
     while (true) {
-
       // has buffer and not full
       bool ok1 = _mptr->capacity > 0 && _mptr->buffer.size() < _mptr->capacity;
 
@@ -106,7 +105,7 @@ class Channel {
       if (!_mptr->buffer.empty()) {
         _mptr->r_cond.notify();
         co_return true;
-      } else {
+      } else if (i == 0) {
         _mptr->w_cond.notify();
         co_await _mptr->r_cond.wait(_mptr->weak_from_this());  // unlock here
       }
@@ -154,7 +153,7 @@ class Channel {
     std::queue<T> buffer;
     size_t capacity = 0;
 
-    Member(size_t capacity) : mutex(), r_cond(mutex), w_cond(mutex), capacity(capacity) {}
+    Member(size_t capacity) : mutex(), r_cond(&mutex), w_cond(&mutex), capacity(capacity) {}
   };
 
  private:

@@ -1,9 +1,9 @@
-#include "cgo.h"
-
 #include <stdio.h>
 
 #include <any>
 #include <string>
+
+#include "cgo.h"
 
 cgo::Coroutine<int> bar(int n) {
   int res = 0;

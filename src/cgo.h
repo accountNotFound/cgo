@@ -32,7 +32,7 @@ extern Coroutine<T> timeout(Coroutine<T>&& target, int64_t timeout_ms);
 
 class Context {
  public:
-  Context() : _executor(_scheduler, _time_handler, _event_handler) {}
+  Context() : _executor(&_scheduler, &_time_handler, &_event_handler) {}
   Context(const Context&) = delete;
   Context(Context&&) = delete;
 

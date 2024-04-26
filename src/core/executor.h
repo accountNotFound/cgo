@@ -12,8 +12,8 @@ class EventHandler;
 
 class Executor {
  public:
-  Executor(Scheduler& scheduler, TimeHandler& time_handler, EventHandler& event_handler)
-      : _scheduler(&scheduler), _time_handler(&time_handler), _event_handler(&event_handler) {}
+  Executor(Scheduler* scheduler, TimeHandler* time_handler, EventHandler* event_handler)
+      : _scheduler(scheduler), _time_handler(time_handler), _event_handler(event_handler) {}
   void start(size_t worker_num);
   void stop();
 
