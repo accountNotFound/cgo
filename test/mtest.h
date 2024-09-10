@@ -78,7 +78,7 @@ int main() {
   {                                                                                                    \
     if (!(expr)) {                                                                                     \
       std::printf("%s -> %s() [line: %d] " fmt "\n", __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__); \
-      throw mtest::TestException();                                                               \
+      throw mtest::TestException();                                                                    \
     }                                                                                                  \
   }
 
