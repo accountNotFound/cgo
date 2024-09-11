@@ -74,6 +74,8 @@ int main() {
                                                                                                          \
   void TEST_CLASS(test_name, test_suite_name)::_run()
 
+#define DISABLE_TEST(test_name, test_suite_name) void disabled_test__##test_name##__##test_suite_name()
+
 #define ASSERT(expr, fmt, ...)                                                                         \
   {                                                                                                    \
     if (!(expr)) {                                                                                     \

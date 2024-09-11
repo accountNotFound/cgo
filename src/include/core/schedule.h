@@ -1,7 +1,7 @@
 #pragma once
 
+#include <any>
 #include <atomic>
-#include <functional>
 #include <list>
 #include <mutex>
 #include <queue>
@@ -25,17 +25,45 @@ class Spinlock {
 namespace _impl::_sched {
 
 struct Task {
-  int const id;
+  const int id;
   Coroutine<void> fn;
+  std::any local = {};
 
-  Task(int id, Coroutine<void> fn) : id(id), fn(std::move(fn)) { this->fn.init(); }
+  Task(int id, Coroutine<void> fn) : id(id), fn(std::move(fn)) {}
 };
 
-class Allocator {
+class TaskHandler {
  public:
-  Task* create(int id, Coroutine<void> fn);
+  TaskHandler() = default;
 
-  void destroy(Task* task);
+  TaskHandler(Task* task) : _task(task) {}
+
+  int id() const { return this->_task->id; }
+
+  std::any& local() const { return this->_task->local; }
+
+  bool runnable() const { return this->_task && !this->_task->fn.done(); }
+
+  bool done() const { return this->_task && this->_task->fn.done(); }
+
+  operator bool() const { return this->_task; }
+
+  template <typename T>
+  void set_local(T&& var) {
+    this->_task->local = std::move(var);
+  }
+
+  void resume() { this->_task->fn.resume(); }
+
+ private:
+  Task* _task = nullptr;
+};
+
+class TaskAllocator {
+ public:
+  TaskHandler create(int id, Coroutine<void> fn);
+
+  void destroy(TaskHandler task);
 
  private:
   Spinlock _mtx;
@@ -43,53 +71,62 @@ class Allocator {
   std::list<Task> _pool;
 };
 
-class Queue {
+class TaskQueue {
  public:
-  void push(Task* task);
+  void push(TaskHandler task);
 
-  Task* pop();
+  TaskHandler pop();
 
  private:
   Spinlock _mtx;
-  std::queue<Task*> _que;
+  std::queue<TaskHandler> _que;
 };
 
-class Enginee {
+class TaskExecutor {
  public:
-  Enginee(size_t partition_num) : _allocators(partition_num), _q_runnables(partition_num) {}
+  static TaskHandler& get_running_task() { return TaskExecutor::_t_running; }
 
-  void create(Coroutine<void> fn);
+  static std::suspend_always yield_running_task();
 
-  void destroy(Task* task) { this->_allocators[task->id % this->_allocators.size()].destroy(task); }
+  static std::suspend_always suspend_running_task(TaskQueue& q_waiting);
 
-  bool execute(size_t index);
-
-  void schedule(Task* task) { this->_q_runnables[task->id % this->_q_runnables.size()].push(task); }
-
-  std::suspend_always wait(Queue& queue);
-
-  std::suspend_always yield();
-
-  Task* this_task() const { return Enginee::_running; }
+  static void execute(TaskHandler task);
 
  private:
-  inline static thread_local Task* _running = nullptr;
-  std::atomic<int> _gid;
-  std::vector<Allocator> _allocators;
-  std::vector<Queue> _q_runnables;
+  inline static thread_local TaskHandler _t_running = nullptr;
 };
 
-class Condition {
+class TaskCondition {
  public:
   Coroutine<void> wait(std::unique_lock<Spinlock>& lock);
 
   void notify();
 
  private:
-  _impl::_sched::Queue _q_waiting;
+  TaskQueue _q_waiting;
 };
 
-extern std::unique_ptr<Enginee> g_enginee;
+class TaskDispatcher {
+ public:
+  TaskDispatcher(size_t n_partition = 0) : _t_allocs(n_partition), _q_runnables(n_partition) {}
+
+  void create(Coroutine<void> fn);
+
+  void destroy(TaskHandler task);
+
+  void submit(TaskHandler task);
+
+  TaskHandler dispatch(size_t p_index);
+
+ private:
+  std::atomic<int> _tid;
+  std::vector<TaskAllocator> _t_allocs;
+  std::vector<TaskQueue> _q_runnables;
+};
+
+inline std::unique_ptr<TaskDispatcher> g_dispatcher = nullptr;
+
+inline TaskDispatcher& get_dispatcher() { return *g_dispatcher; }
 
 }  // namespace _impl::_sched
 
@@ -110,7 +147,7 @@ class Semaphore {
  private:
   struct Member {
     Spinlock mtx;
-    _impl::_sched::Condition cond;
+    _impl::_sched::TaskCondition cond;
     size_t vacant;
 
     Member(size_t cnt) : vacant(cnt) {}
@@ -131,10 +168,12 @@ class Mutex {
   Semaphore _sem;
 };
 
-inline void spawn(Coroutine<void> fn) { _impl::_sched::g_enginee->create(std::move(fn)); }
+inline void spawn(Coroutine<void> fn) { _impl::_sched::get_dispatcher().create(std::move(fn)); }
 
-inline Coroutine<void> yield() { co_await _impl::_sched::g_enginee->yield(); }
+inline Coroutine<void> yield() { co_await _impl::_sched::TaskExecutor::yield_running_task(); }
 
-inline int this_coroutine_id() { return _impl::_sched::g_enginee->this_task()->id; }
+inline int this_coroutine_id() { return _impl::_sched::TaskExecutor::get_running_task().id(); }
+
+inline std::any& this_coroutine_local() { return _impl::_sched::TaskExecutor::get_running_task().local(); }
 
 }  // namespace cgo

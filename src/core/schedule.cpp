@@ -1,8 +1,5 @@
 #include "core/schedule.h"
 
-#include <random>
-#include <thread>
-
 namespace cgo {
 
 void Spinlock::lock() {
@@ -14,84 +11,97 @@ void Spinlock::lock() {
 
 namespace _impl::_sched {
 
-std::unique_ptr<Enginee> g_enginee = nullptr;
-
-Task* Allocator::create(int id, Coroutine<void> fn) {
-  std::unique_lock guard(this->_mtx);
-  this->_index[id] = this->_pool.emplace(this->_pool.end(), id, std::move(fn));
+TaskHandler TaskAllocator::create(int id, Coroutine<void> fn) {
+  fn.init();
+  {
+    std::unique_lock guard(this->_mtx);
+    this->_index[id] = this->_pool.emplace(this->_pool.end(), id, std::move(fn));
+  }
   return &*this->_index[id];
 }
 
-void Allocator::destroy(Task* task) {
-  std::unique_lock guard(this->_mtx);
-  int id = task->id;
-  this->_pool.erase(this->_index[id]);
-  this->_index.erase(id);
+void TaskAllocator::destroy(TaskHandler task) {
+  int id = task.id();
+  {
+    std::unique_lock guard(this->_mtx);
+    this->_pool.erase(this->_index.at(id));
+    this->_index.erase(id);
+  }
 }
 
-void Queue::push(Task* task) {
+void TaskQueue::push(TaskHandler task) {
   std::unique_lock guard(this->_mtx);
   this->_que.push(task);
 }
 
-Task* Queue::pop() {
+TaskHandler TaskQueue::pop() {
   std::unique_lock guard(this->_mtx);
   if (this->_que.empty()) {
     return nullptr;
   }
-  Task* task = this->_que.front();
+  auto task = this->_que.front();
   this->_que.pop();
   return task;
 }
 
-void Enginee::create(Coroutine<void> fn) {
-  int id = this->_gid.fetch_add(1);
-  auto task = this->_allocators[id % this->_allocators.size()].create(id, std::move(fn));
-  this->schedule(task);
-}
-
-bool Enginee::execute(size_t index) {
-  Task* task = nullptr;
-  for (int i = 0; i < this->_q_runnables.size() && !task; i++) {
-    task = this->_q_runnables[(index + i) % this->_q_runnables.size()].pop();
-  }
-  if (!task) {
-    return false;
-  }
-
-  Enginee::_running = task;
-  while (Enginee::_running && !Enginee::_running->fn.done()) {
-    Enginee::_running->fn.resume();
-  }
-  if (Enginee::_running) {
-    this->destroy(Enginee::_running);
-  }
-  return true;
-}
-
-std::suspend_always Enginee::wait(Queue& queue) {
-  queue.push(Enginee::_running);
-  Enginee::_running = nullptr;
+std::suspend_always TaskExecutor::yield_running_task() {
+  get_dispatcher().submit(TaskExecutor::_t_running);
+  TaskExecutor::_t_running = nullptr;
   return {};
 }
 
-std::suspend_always Enginee::yield() {
-  int slot = Enginee::_running->id % this->_q_runnables.size();
-  this->_q_runnables[slot].push(Enginee::_running);
-  Enginee::_running = nullptr;
+std::suspend_always TaskExecutor::suspend_running_task(TaskQueue& q_waiting) {
+  q_waiting.push(TaskExecutor::_t_running);
+  TaskExecutor::_t_running = nullptr;
   return {};
 }
 
-Coroutine<void> Condition::wait(std::unique_lock<Spinlock>& lock) {
+void TaskExecutor::execute(TaskHandler task) {
+  TaskExecutor::_t_running = task;
+  while (TaskExecutor::_t_running.runnable()) {
+    TaskExecutor::_t_running.resume();
+  }
+  if (TaskExecutor::_t_running.done()) {
+    get_dispatcher().destroy(TaskExecutor::_t_running);
+  }
+}
+
+Coroutine<void> TaskCondition::wait(std::unique_lock<Spinlock>& lock) {
   lock.unlock();
-  co_await g_enginee->wait(this->_q_waiting);
+  co_await TaskExecutor::suspend_running_task(this->_q_waiting);
   lock.lock();
 }
 
-void Condition::notify() {
+void TaskCondition::notify() {
   if (auto next = this->_q_waiting.pop(); next) {
-    g_enginee->schedule(next);
+    get_dispatcher().submit(next);
   }
+}
+
+void TaskDispatcher::create(Coroutine<void> fn) {
+  int id = this->_tid.fetch_add(1);
+  int slot = id % this->_t_allocs.size();
+  auto task = this->_t_allocs[slot].create(id, std::move(fn));
+  this->_q_runnables[slot].push(task);
+}
+
+void TaskDispatcher::destroy(TaskHandler task) {
+  int slot = task.id() % this->_t_allocs.size();
+  this->_t_allocs[slot].destroy(task);
+}
+
+void TaskDispatcher::submit(TaskHandler task) {
+  int slot = task.id() % this->_q_runnables.size();
+  this->_q_runnables[slot].push(task);
+}
+
+TaskHandler TaskDispatcher::dispatch(size_t p_index) {
+  TaskHandler task = nullptr;
+  for (int i = 0; !task && i < this->_q_runnables.size(); i++) {
+    int slot = (p_index + i) % this->_q_runnables.size();
+    task = this->_q_runnables[slot].pop();
+  }
+  return task;
 }
 
 }  // namespace _impl::_sched

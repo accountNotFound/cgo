@@ -8,7 +8,7 @@ namespace cgo::_impl::_ctx {
 
 class Context {
  public:
-  void start(size_t worker_num);
+  void start(size_t n_worker);
 
   void stop();
 
@@ -19,13 +19,15 @@ class Context {
   bool _finished = false;
 };
 
-extern std::unique_ptr<Context> g_context;
+inline std::unique_ptr<Context> g_context = nullptr;
+
+inline Context& get_context() { return *g_context; }
 
 }  // namespace cgo::_impl::_ctx
 
 namespace cgo {
 
-void start_context(size_t worker_num);
+void start_context(size_t n_worker);
 
 void stop_context();
 
