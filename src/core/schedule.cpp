@@ -58,17 +58,18 @@ std::suspend_always TaskExecutor::suspend_running_task(TaskQueue& q_waiting) {
 
 void TaskExecutor::execute(TaskHandler task) {
   TaskExecutor::_t_running = task;
-  while (TaskExecutor::_t_running.runnable()) {
+  while (TaskExecutor::_t_running && !TaskExecutor::_t_running.done()) {
     TaskExecutor::_t_running.resume();
   }
-  if (TaskExecutor::_t_running.done()) {
+  if (TaskExecutor::_t_running) {
     get_dispatcher().destroy(TaskExecutor::_t_running);
   }
 }
 
 Coroutine<void> TaskCondition::wait(std::unique_lock<Spinlock>& lock) {
+  TaskExecutor::suspend_running_task(this->_q_waiting);
   lock.unlock();
-  co_await TaskExecutor::suspend_running_task(this->_q_waiting);
+  co_await std::suspend_always{};
   lock.lock();
 }
 
@@ -118,8 +119,10 @@ Coroutine<void> Semaphore::aquire() {
 }
 
 void Semaphore::release() {
-  std::unique_lock guard(_self->mtx);
-  _self->vacant++;
+  {
+    std::unique_lock guard(_self->mtx);
+    _self->vacant++;
+  }
   _self->cond.notify();
 }
 

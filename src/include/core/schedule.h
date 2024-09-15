@@ -38,20 +38,13 @@ class TaskHandler {
 
   TaskHandler(Task* task) : _task(task) {}
 
+  operator bool() const { return this->_task; }
+
   int id() const { return this->_task->id; }
 
   std::any& local() const { return this->_task->local; }
 
-  bool runnable() const { return this->_task && !this->_task->fn.done(); }
-
-  bool done() const { return this->_task && this->_task->fn.done(); }
-
-  operator bool() const { return this->_task; }
-
-  template <typename T>
-  void set_local(T&& var) {
-    this->_task->local = std::move(var);
-  }
+  bool done() const { return this->_task->fn.done(); }
 
   void resume() { this->_task->fn.resume(); }
 
@@ -86,8 +79,14 @@ class TaskExecutor {
  public:
   static TaskHandler& get_running_task() { return TaskExecutor::_t_running; }
 
+  /**
+   * @brief Don't touch running_task anymore after call this method
+   */
   static std::suspend_always yield_running_task();
 
+  /**
+   * @brief Don't touch running_task anymore after call this method
+   */
   static std::suspend_always suspend_running_task(TaskQueue& q_waiting);
 
   static void execute(TaskHandler task);
@@ -135,7 +134,7 @@ class Semaphore {
   Semaphore(size_t cnt) : _self(std::make_shared<Member>(cnt)) {}
 
   /**
-   * @brief Decrease the semaphore automatically if vacant count > 0, or suspend if count == 0
+   * @brief Decrease the semaphore automatically if vacant count > 0, or suspend if count <= 0
    */
   Coroutine<void> aquire();
 

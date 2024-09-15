@@ -66,7 +66,7 @@ class Coroutine {
     Coroutine get_return_object() { return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this)); }
   };
 
-  Coroutine() : _handler(std::noop_coroutine()) {}
+  Coroutine() : _handler(nullptr) {}
 
   Coroutine(const Coroutine&) = delete;
 
@@ -117,6 +117,7 @@ class Coroutine {
   void _drop() {
     if (this->_handler) {
       this->_handler.destroy();
+      this->_handler = nullptr;
     }
   }
 };
