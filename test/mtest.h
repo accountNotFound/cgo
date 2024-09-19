@@ -76,12 +76,13 @@ int main() {
 
 #define DISABLE_TEST(test_name, test_suite_name) void disabled_test__##test_name##__##test_suite_name()
 
-#define ASSERT(expr, fmt, ...)                                                                         \
-  {                                                                                                    \
-    if (!(expr)) {                                                                                     \
-      std::printf("%s -> %s() [line: %d] " fmt "\n", __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__); \
-      throw mtest::TestException();                                                                    \
-    }                                                                                                  \
+#define ASSERT(expr, fmt, ...)                                                                               \
+  {                                                                                                          \
+    if (!(expr)) {                                                                                           \
+      std::printf("%s -> %s() [line: %d] ASSERT(" STR(expr) ") " fmt "\n", __FILE__, __FUNCTION__, __LINE__, \
+                  ##__VA_ARGS__);                                                                            \
+      throw mtest::TestException();                                                                          \
+    }                                                                                                        \
   }
 
 #define ASSERT_RAISE(expr, ex_type, fmt, ...)      \

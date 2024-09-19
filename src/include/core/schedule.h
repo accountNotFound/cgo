@@ -79,20 +79,17 @@ class TaskExecutor {
  public:
   static TaskHandler& get_running_task() { return TaskExecutor::_t_running; }
 
-  /**
-   * @brief Don't touch running_task anymore after call this method
-   */
   static std::suspend_always yield_running_task();
 
-  /**
-   * @brief Don't touch running_task anymore after call this method
-   */
-  static std::suspend_always suspend_running_task(TaskQueue& q_waiting);
+  static std::suspend_always suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& lock);
 
   static void execute(TaskHandler task);
 
  private:
   inline static thread_local TaskHandler _t_running = nullptr;
+  inline static thread_local bool _yield_flag = false;
+  inline static thread_local TaskQueue* _suspend_q_waiting = nullptr;
+  inline static thread_local std::unique_lock<Spinlock>* _suspend_unlock = nullptr;
 };
 
 class TaskCondition {

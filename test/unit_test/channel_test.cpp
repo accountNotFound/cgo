@@ -23,7 +23,9 @@ void test(int n_reader, int n_writer, int buffer_size) {
   for (int i = 0; i < n_reader; i++) {
     cgo::spawn([](decltype(r_res)& r_res, decltype(add)& add, decltype(chan) chan) -> cgo::Coroutine<void> {
       for (int i = 0; i < foo_loop; i++) {
-        int v = co_await chan.recv();
+        // int v = co_await chan.recv();
+        int v;
+        co_await (chan >> v);
         add(v);
       }
       r_res.fetch_add(1);
@@ -33,7 +35,8 @@ void test(int n_reader, int n_writer, int buffer_size) {
   for (int i = 0; i < n_writer; i++) {
     cgo::spawn([](decltype(r_res)& w_res, decltype(chan) chan) -> cgo::Coroutine<void> {
       for (int i = 0; i < foo_loop; i++) {
-        co_await chan.send(i);
+        // co_await chan.send(i);
+        co_await (chan << i);
       }
       w_res.fetch_add(1);
     }(w_res, chan));

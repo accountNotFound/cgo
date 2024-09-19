@@ -45,30 +45,36 @@ TaskHandler TaskQueue::pop() {
 }
 
 std::suspend_always TaskExecutor::yield_running_task() {
-  get_dispatcher().submit(TaskExecutor::_t_running);
-  TaskExecutor::_t_running = nullptr;
+  TaskExecutor::_yield_flag = true;
   return {};
 }
 
-std::suspend_always TaskExecutor::suspend_running_task(TaskQueue& q_waiting) {
-  q_waiting.push(TaskExecutor::_t_running);
-  TaskExecutor::_t_running = nullptr;
+std::suspend_always TaskExecutor::suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& lock) {
+  TaskExecutor::_suspend_q_waiting = &q_waiting;
+  TaskExecutor::_suspend_unlock = &lock;
   return {};
 }
 
 void TaskExecutor::execute(TaskHandler task) {
   TaskExecutor::_t_running = task;
-  while (TaskExecutor::_t_running && !TaskExecutor::_t_running.done()) {
-    TaskExecutor::_t_running.resume();
+  while (!TaskExecutor::_yield_flag && !TaskExecutor::_suspend_q_waiting && !task.done()) {
+    task.resume();
   }
-  if (TaskExecutor::_t_running) {
-    get_dispatcher().destroy(TaskExecutor::_t_running);
+  if (TaskExecutor::_yield_flag) {
+    get_dispatcher().submit(task);
+    TaskExecutor::_yield_flag = false;
+  } else if (TaskExecutor::_suspend_q_waiting) {
+    TaskExecutor::_suspend_q_waiting->push(task);
+    TaskExecutor::_suspend_unlock->unlock();
+    TaskExecutor::_suspend_q_waiting = nullptr;
+    TaskExecutor::_suspend_unlock = nullptr;
+  } else {
+    get_dispatcher().destroy(task);
   }
 }
 
 Coroutine<void> TaskCondition::wait(std::unique_lock<Spinlock>& lock) {
-  TaskExecutor::suspend_running_task(this->_q_waiting);
-  lock.unlock();
+  TaskExecutor::suspend_running_task(this->_q_waiting, lock);
   co_await std::suspend_always{};
   lock.lock();
 }

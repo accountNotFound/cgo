@@ -79,7 +79,49 @@ namespace cgo {
 template <typename T>
 class Channel {
  public:
+  struct Sender {
+   public:
+    Channel chan;
+    T src;
+    _impl::_chan::ChannelImpl<T>::Delegator fsend = nullptr;
+    Semaphore sem = {0};
+
+    Sender(Channel<T> chan, T src) : chan(chan), src(std::move(src)) {}
+
+    Coroutine<void> operator co_await() {
+      if (!this->fsend) {
+        co_await this->chan.send(std::move(this->src));
+      } else if (!this->chan._impl->send(&this->src, std::move(this->fsend))) {
+        co_await this->sem.aquire();
+      }
+    }
+  };
+
+  struct Reciever {
+   public:
+    Channel chan;
+    std::reference_wrapper<T> dst;
+    _impl::_chan::ChannelImpl<T>::Delegator frecv = nullptr;
+    Semaphore sem = {0};
+
+    Reciever(Channel<T> chan, T& dst) : chan(chan), dst(dst) {}
+
+    Coroutine<void> operator co_await() {
+      if (!this->frecv) {
+        this->dst.get() = co_await this->chan.recv();
+      } else if (!this->chan._impl->send(&this->dst.get(), std::move(this->frecv))) {
+        co_await this->sem.aquire();
+      }
+    }
+  };
+
   Channel(size_t capacity = 0) : _impl(std::make_shared<_impl::_chan::ChannelImpl<T>>(capacity)) {}
+
+  Sender operator<<(const T& x) { return {*this, x}; }
+
+  Sender operator<<(T&& x) { return {*this, std::move(x)}; }
+
+  Reciever operator>>(T& x) { return {*this, std::ref(x)}; }
 
   Coroutine<void> send(const T& x) {
     T x_copy = x;

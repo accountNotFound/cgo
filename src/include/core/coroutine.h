@@ -117,7 +117,6 @@ class Coroutine {
   void _drop() {
     if (this->_handler) {
       this->_handler.destroy();
-      this->_handler = nullptr;
     }
   }
 };
