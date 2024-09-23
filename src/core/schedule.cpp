@@ -44,15 +44,16 @@ TaskHandler TaskQueue::pop() {
   return task;
 }
 
-std::suspend_always TaskExecutor::yield_running_task() {
+Coroutine<void> TaskExecutor::yield_running_task() {
   TaskExecutor::_yield_flag = true;
-  return {};
+  co_await std::suspend_always{};
 }
 
-std::suspend_always TaskExecutor::suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& lock) {
+Coroutine<void> TaskExecutor::suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& lock) {
   TaskExecutor::_suspend_q_waiting = &q_waiting;
-  TaskExecutor::_suspend_unlock = &lock;
-  return {};
+  TaskExecutor::_suspend_cond_lock = &lock;
+  co_await std::suspend_always{};
+  lock.lock();
 }
 
 void TaskExecutor::execute(TaskHandler task) {
@@ -65,18 +66,16 @@ void TaskExecutor::execute(TaskHandler task) {
     TaskExecutor::_yield_flag = false;
   } else if (TaskExecutor::_suspend_q_waiting) {
     TaskExecutor::_suspend_q_waiting->push(task);
-    TaskExecutor::_suspend_unlock->unlock();
+    TaskExecutor::_suspend_cond_lock->unlock();
     TaskExecutor::_suspend_q_waiting = nullptr;
-    TaskExecutor::_suspend_unlock = nullptr;
+    TaskExecutor::_suspend_cond_lock = nullptr;
   } else {
     get_dispatcher().destroy(task);
   }
 }
 
 Coroutine<void> TaskCondition::wait(std::unique_lock<Spinlock>& lock) {
-  TaskExecutor::suspend_running_task(this->_q_waiting, lock);
-  co_await std::suspend_always{};
-  lock.lock();
+  return TaskExecutor::suspend_running_task(this->_q_waiting, lock);
 }
 
 void TaskCondition::notify() {

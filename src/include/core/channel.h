@@ -1,75 +1,90 @@
 #pragma once
 
 #include <functional>
+#include <random>
+#include <vector>
 
 #include "core/schedule.h"
 
 namespace cgo::_impl::_chan {
 
-template <typename T>
-class ChannelImpl {
+class ValueBase : public std::enable_shared_from_this<ValueBase> {
  public:
-  using Delegator = std::function<bool(T*)>;
+  /**
+   * @brief The returned spinlock will be used to protected `data()` ptr, if returned value is not null
+   */
+  virtual Spinlock* mutex() { return nullptr; }
 
-  ChannelImpl(size_t capacity) : _capacity(capacity) {}
+  /**
+   * @brief Pointer to be read or write by move semantic. Return nullptr if this object is expired
+   * @note Don't lock/unlock `mutex()` inside this method. Mutex will be lock if necessary inside channel
+   */
+  virtual void* data() { return nullptr; }
 
-  bool send(T* src, Delegator sender) {
-    std::unique_lock guard(this->_mtx);
-    if (this->_buffer.size() < this->_capacity) {
-      this->_buffer.push(std::move(*src));
-      if (this->_delegate(this->_recievers, &this->_buffer.front())) {
-        this->_buffer.pop();
-      }
-      return true;
-    }
-    if (this->_capacity > 0) {
-      if (this->_delegate(this->_recievers, &this->_buffer.front())) {
-        this->_buffer.pop();
-        this->_buffer.push(std::move(*src));
-        return true;
-      }
-    } else {
-      if (this->_delegate(this->_recievers, src)) {
-        return true;
-      }
-    }
-    this->_senders.push(std::move(sender));
-    return false;
-  }
+  /**
+   * @brief This method will be called once send/write/close event happend
+   * @param success: True if the `data()` ptr is consumed/overwrote. Or false if channel is closed
+   */
+  virtual void commit(bool success) {};
+};
 
-  bool recv(T* dst, Delegator reciever) {
-    std::unique_lock guard(this->_mtx);
-    if (this->_buffer.size() > 0) {
-      *dst = std::move(this->_buffer.front());
-      this->_buffer.pop();
-      if (T x; this->_delegate(this->_senders, &x)) {
-        this->_buffer.push(std::move(x));
-      }
-      return true;
-    }
-    if (this->_delegate(this->_senders, dst)) {
-      return true;
-    }
-    this->_recievers.push(std::move(reciever));
-    return false;
-  }
+class ChannelBase {
+ public:
+  ChannelBase(size_t capacity) : _capacity(capacity) {}
+
+  bool send(std::shared_ptr<ValueBase>& src);
+
+  bool recv(std::shared_ptr<ValueBase>& dst);
+
+ protected:
+  /**
+   * @brief Move semantic
+   */
+  virtual void _send_to_buffer_impl(void* src) = 0;
+
+  /**
+   * @brief Move semantic
+   */
+  virtual void _recv_from_buffer_impl(void* dst) = 0;
+
+  /**
+   * @brief Move semantic
+   */
+  virtual void _transmit_impl(void* src, void* dst) = 0;
 
  private:
   const size_t _capacity;
   Spinlock _mtx;
-  std::queue<T> _buffer;
-  std::queue<Delegator> _senders, _recievers;
+  std::queue<std::weak_ptr<ValueBase>> _senders, _recievers;
+  size_t _size = 0;
 
-  bool _delegate(std::queue<Delegator>& delegators, T* p) {
-    while (!delegators.empty()) {
-      auto delegator = std::move(delegators.front());
-      delegators.pop();
-      if (delegator(p)) {
-        return true;
-      }
-    }
-    return false;
+  bool _send_to_buffer(std::shared_ptr<ValueBase>& src);
+
+  bool _recv_from_buffer(std::shared_ptr<ValueBase>& dst);
+
+  bool _send_to_reciever(std::shared_ptr<ValueBase>& src);
+
+  bool _recv_from_sender(std::shared_ptr<ValueBase>& dst);
+
+  bool _transmit(std::shared_ptr<ValueBase>& src, std::shared_ptr<ValueBase>& dst);
+};
+
+template <typename T>
+class ChannelImpl : public ChannelBase {
+ public:
+  ChannelImpl(size_t capacity) : ChannelBase(capacity) {}
+
+ private:
+  std::queue<T> _buffer;
+
+  void _send_to_buffer_impl(void* src) override { this->_buffer.push(std::move(*static_cast<T*>(src))); }
+
+  void _recv_from_buffer_impl(void* dst) override {
+    *static_cast<T*>(dst) = std::move(this->_buffer.front());
+    this->_buffer.pop();
   }
+
+  void _transmit_impl(void* src, void* dst) override { *static_cast<T*>(dst) = std::move(*static_cast<T*>(src)); }
 };
 
 }  // namespace cgo::_impl::_chan
@@ -79,90 +94,53 @@ namespace cgo {
 template <typename T>
 class Channel {
  public:
-  struct Sender {
-   public:
-    Channel chan;
-    T src;
-    _impl::_chan::ChannelImpl<T>::Delegator fsend = nullptr;
-    Semaphore sem = {0};
-
-    Sender(Channel<T> chan, T src) : chan(chan), src(std::move(src)) {}
-
-    Coroutine<void> operator co_await() {
-      if (!this->fsend) {
-        co_await this->chan.send(std::move(this->src));
-      } else if (!this->chan._impl->send(&this->src, std::move(this->fsend))) {
-        co_await this->sem.aquire();
-      }
-    }
-  };
-
-  struct Reciever {
-   public:
-    Channel chan;
-    std::reference_wrapper<T> dst;
-    _impl::_chan::ChannelImpl<T>::Delegator frecv = nullptr;
-    Semaphore sem = {0};
-
-    Reciever(Channel<T> chan, T& dst) : chan(chan), dst(dst) {}
-
-    Coroutine<void> operator co_await() {
-      if (!this->frecv) {
-        this->dst.get() = co_await this->chan.recv();
-      } else if (!this->chan._impl->send(&this->dst.get(), std::move(this->frecv))) {
-        co_await this->sem.aquire();
-      }
-    }
-  };
-
   Channel(size_t capacity = 0) : _impl(std::make_shared<_impl::_chan::ChannelImpl<T>>(capacity)) {}
 
-  Sender operator<<(const T& x) { return {*this, x}; }
-
-  Sender operator<<(T&& x) { return {*this, std::move(x)}; }
-
-  Reciever operator>>(T& x) { return {*this, std::ref(x)}; }
-
-  Coroutine<void> send(const T& x) {
+  Coroutine<bool> operator<<(const T& x) {
     T x_copy = x;
-    Semaphore sem(0);
-    bool ok = _impl->send(&x_copy, [&x_copy, &sem](T* dst) {
-      *dst = std::move(x_copy);
-      sem.release();
-      return true;
-    });
-    if (!ok) {
-      co_await sem.aquire();
+    Value value(&x_copy);
+    std::shared_ptr<_impl::_chan::ValueBase> src(&value, [](auto* p) {});
+    if (!this->_impl->send(src)) {
+      co_await value.sem.aquire();
     }
+    co_return std::move(value.ok);
   }
 
-  Coroutine<void> send(T&& x) {
-    Semaphore sem(0);
-    bool ok = _impl->send(&x, [&x, &sem](T* dst) {
-      *dst = std::move(x);
-      sem.release();
-      return true;
-    });
-    if (!ok) {
-      co_await sem.aquire();
+  Coroutine<bool> operator<<(T&& x) {
+    Value value(&x);
+    std::shared_ptr<_impl::_chan::ValueBase> src(&value, [](auto* p) {});
+    if (!this->_impl->send(src)) {
+      co_await value.sem.aquire();
     }
+    co_return std::move(value.ok);
   }
 
-  Coroutine<T> recv() {
-    Semaphore sem(0);
-    T x;
-    bool ok = _impl->recv(&x, [&x, &sem](T* src) {
-      x = std::move(*src);
-      sem.release();
-      return true;
-    });
-    if (!ok) {
-      co_await sem.aquire();
+  Coroutine<bool> operator>>(T& x) {
+    Value value(&x);
+    std::shared_ptr<_impl::_chan::ValueBase> dst(&value, [](auto* p) {});
+    if (!this->_impl->recv(dst)) {
+      co_await value.sem.aquire();
     }
-    co_return std::move(x);
+    co_return std::move(value.ok);
   }
 
  private:
+  struct Value : public _impl::_chan::ValueBase {
+   public:
+    T* ptr;
+    Semaphore sem = {0};
+    bool ok = false;
+
+    Value(T* data) : ptr(data) {}
+
+    void* data() override { return this->ptr; }
+
+    void commit(bool success) override {
+      this->ok = success;
+      this->sem.release();
+    }
+  };
+
   std::shared_ptr<_impl::_chan::ChannelImpl<T>> _impl;
 };
 

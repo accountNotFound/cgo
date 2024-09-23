@@ -27,7 +27,7 @@ namespace _impl::_sched {
 struct Task {
   const int id;
   Coroutine<void> fn;
-  std::any local = {};
+  std::vector<std::any> locals;
 
   Task(int id, Coroutine<void> fn) : id(id), fn(std::move(fn)) {}
 };
@@ -42,7 +42,7 @@ class TaskHandler {
 
   int id() const { return this->_task->id; }
 
-  std::any& local() const { return this->_task->local; }
+  std::vector<std::any>& locals() const { return this->_task->locals; }
 
   bool done() const { return this->_task->fn.done(); }
 
@@ -79,17 +79,17 @@ class TaskExecutor {
  public:
   static TaskHandler& get_running_task() { return TaskExecutor::_t_running; }
 
-  static std::suspend_always yield_running_task();
+  static Coroutine<void> yield_running_task();
 
-  static std::suspend_always suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& lock);
+  static Coroutine<void> suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& cond_lock);
 
   static void execute(TaskHandler task);
 
  private:
   inline static thread_local TaskHandler _t_running = nullptr;
-  inline static thread_local bool _yield_flag = false;
   inline static thread_local TaskQueue* _suspend_q_waiting = nullptr;
-  inline static thread_local std::unique_lock<Spinlock>* _suspend_unlock = nullptr;
+  inline static thread_local std::unique_lock<Spinlock>* _suspend_cond_lock = nullptr;
+  inline static thread_local bool _yield_flag = false;
 };
 
 class TaskCondition {
@@ -166,10 +166,10 @@ class Mutex {
 
 inline void spawn(Coroutine<void> fn) { _impl::_sched::get_dispatcher().create(std::move(fn)); }
 
-inline Coroutine<void> yield() { co_await _impl::_sched::TaskExecutor::yield_running_task(); }
+inline Coroutine<void> yield() { return _impl::_sched::TaskExecutor::yield_running_task(); }
 
 inline int this_coroutine_id() { return _impl::_sched::TaskExecutor::get_running_task().id(); }
 
-inline std::any& this_coroutine_local() { return _impl::_sched::TaskExecutor::get_running_task().local(); }
+inline auto& this_coroutine_locals() { return _impl::_sched::TaskExecutor::get_running_task().locals(); }
 
 }  // namespace cgo
