@@ -110,25 +110,45 @@ TaskHandler TaskDispatcher::dispatch(size_t p_index) {
   return task;
 }
 
-}  // namespace _impl::_sched
-
-Coroutine<void> Semaphore::aquire() {
-  std::unique_lock guard(_self->mtx);
+Coroutine<void> SemaphoreImpl::aquire() {
+  std::unique_lock guard(this->_mtx);
   while (true) {
-    if (_self->vacant > 0) {
-      _self->vacant--;
+    if (this->_vacant > 0) {
+      this->_vacant--;
       co_return;
     }
-    co_await _self->cond.wait(guard);
+    co_await this->_cond.wait(guard);
   }
 }
 
-void Semaphore::release() {
+void SemaphoreImpl::release() {
   {
-    std::unique_lock guard(_self->mtx);
-    _self->vacant++;
+    std::unique_lock guard(this->_mtx);
+    this->_vacant++;
   }
-  _self->cond.notify();
+  this->_cond.notify();
+}
+
+}  // namespace _impl::_sched
+
+LockGuard::LockGuard(LockGuard&& rhs) {
+  if (this->_mtx) {
+    this->release();
+  }
+  std::swap(this->_mtx, rhs._mtx);
+}
+
+LockGuard::~LockGuard() {
+  if (this->_mtx) {
+    this->release();
+  }
+}
+
+Mutex& LockGuard::release() {
+  this->_mtx->unlock();
+  Mutex& ref = *this->_mtx;
+  this->_mtx = nullptr;
+  return ref;
 }
 
 }  // namespace cgo

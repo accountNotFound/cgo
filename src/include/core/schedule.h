@@ -124,44 +124,73 @@ inline std::unique_ptr<TaskDispatcher> g_dispatcher = nullptr;
 
 inline TaskDispatcher& get_dispatcher() { return *g_dispatcher; }
 
+class SemaphoreImpl {
+ public:
+  SemaphoreImpl(size_t vacant) : _vacant(vacant) {}
+
+  SemaphoreImpl(const SemaphoreImpl&) = delete;
+
+  SemaphoreImpl(SemaphoreImpl&&) = delete;
+
+  Coroutine<void> aquire();
+
+  void release();
+
+ private:
+  Spinlock _mtx;
+  _impl::_sched::TaskCondition _cond;
+  size_t _vacant;
+};
+
 }  // namespace _impl::_sched
 
 class Semaphore {
  public:
-  Semaphore(size_t cnt) : _self(std::make_shared<Member>(cnt)) {}
+  Semaphore(size_t cnt) : _sem(cnt) {}
 
   /**
    * @brief Decrease the semaphore automatically if vacant count > 0, or suspend if count <= 0
    */
-  Coroutine<void> aquire();
+  Coroutine<void> aquire() { return this->_sem.aquire(); }
 
   /**
    * @brief Increase the semaphore automatically and notify another coroutine which suspend on `aquire()`
    */
-  void release();
+  void release() { this->_sem.release(); }
 
  private:
-  struct Member {
-    Spinlock mtx;
-    _impl::_sched::TaskCondition cond;
-    size_t vacant;
-
-    Member(size_t cnt) : vacant(cnt) {}
-  };
-
-  std::shared_ptr<Member> _self;
+  _impl::_sched::SemaphoreImpl _sem;
 };
 
 class Mutex {
  public:
   Mutex() : _sem(1) {}
 
-  Coroutine<void> lock() { co_await _sem.aquire(); }
+  Coroutine<void> lock() { return this->_sem.aquire(); }
 
   void unlock() { _sem.release(); }
 
  private:
-  Semaphore _sem;
+  _impl::_sched::SemaphoreImpl _sem;
+};
+
+/**
+ * @brief Give a locked mutex for automatically unlocking later
+ */
+class LockGuard {
+ public:
+  LockGuard(Mutex& locked_mutex) : _mtx(&locked_mutex) {}
+
+  LockGuard(const LockGuard&) = delete;
+
+  LockGuard(LockGuard&& rhs);
+
+  ~LockGuard();
+
+  Mutex& release();
+
+ private:
+  Mutex* _mtx;
 };
 
 inline void spawn(Coroutine<void> fn) { _impl::_sched::get_dispatcher().create(std::move(fn)); }
