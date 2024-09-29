@@ -125,8 +125,8 @@ void SemaphoreImpl::release() {
   {
     std::unique_lock guard(this->_mtx);
     this->_vacant++;
+    this->_cond.notify();
   }
-  this->_cond.notify();
 }
 
 }  // namespace _impl::_sched
