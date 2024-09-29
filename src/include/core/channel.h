@@ -220,6 +220,10 @@ class Channel {
   std::shared_ptr<_impl::_chan::ChannelImpl<T>> _impl;
 };
 
+/**
+ * @brief An one-shot select object
+ * @note Touch select object after `Select::operator()` return is undefined behaviour
+ */
 class Select {
  public:
   template <typename T>
@@ -259,12 +263,18 @@ class Select {
 
   Select(const Select&) = delete;
 
+  /**
+   * @param key: The unique key specifing certain channel event. Key should be >= 0
+   */
   template <typename T>
   Case<T> on(int key, Channel<T>& chan) {
     auto msg = std::make_shared<_impl::_chan::SelectMsg>(this->_target, key, nullptr);
     return Case<T>(*this, *chan._impl, msg);
   }
 
+  /**
+   * @return Unique key set in `Select::on()`, or -1 if `with_default=true` and no channel event comes to activate
+   */
   Coroutine<int> operator()(bool with_default);
 
  private:

@@ -60,9 +60,12 @@ TEST(channel, w4r4b0) { channel_test(4, 4, 0); }
 
 TEST(channel, w4r4b1) { channel_test(4, 4, 10); }
 
-void select_test(int n_reader, int n_writer) {
+void select_test(int n_reader, int n_writer, int buffer_size) {
   std::atomic<int> w_res = 0, r_res = 0;
   std::array<cgo::Channel<int>, 3> chans;
+  for (int i = 0; i < 3; i++) {
+    chans[i] = cgo::Channel<int>(buffer_size);
+  }
 
   cgo::Spinlock mtx;
   std::unordered_map<int, int> cnts;
@@ -115,6 +118,10 @@ void select_test(int n_reader, int n_writer) {
   ASSERT(recv_cnt == n_writer * foo_loop, "")
 }
 
-TEST(channel, select_r1w1) { select_test(1, 1); }
+TEST(channel, select_r1w1b0) { select_test(1, 1, 0); }
 
-TEST(channel, select_r4w4) { select_test(4, 4); }
+TEST(channel, select_r4w4b0) { select_test(4, 4, 0); }
+
+TEST(channel, select_r1w1b1) { select_test(1, 1, 10); }
+
+TEST(channel, select_r4w4b1) { select_test(4, 4, 10); }
