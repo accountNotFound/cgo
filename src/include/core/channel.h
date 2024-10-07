@@ -153,7 +153,7 @@ class ChannelMsg : public MessageBase {
 
  private:
   void* _data;
-  Semaphore _sem;
+  _impl::_sched::SemaphoreImpl _sem;
 };
 
 class SelectMsg : public MessageBase {
@@ -162,7 +162,7 @@ class SelectMsg : public MessageBase {
    public:
     Spinlock mtx;
     int rkey = -1;
-    Semaphore sem = {0};
+    _impl::_sched::SemaphoreImpl sem = {0};
     bool done = false;
   };
 
@@ -171,7 +171,7 @@ class SelectMsg : public MessageBase {
 
   void bind(void* data) { this->_data = data; }
 
-  void* data() override { return this->_target->done || this->_target->rkey != -1 ? nullptr : this->_data; }
+  void* data() override { return this->_target->done ? nullptr : this->_data; }
 
   void commit() override;
 
@@ -185,6 +185,9 @@ class SelectMsg : public MessageBase {
 
 namespace cgo {
 
+/**
+ * @brief A copyable reference to real channel object
+ */
 template <typename T>
 class Channel {
   friend class Select;
@@ -237,6 +240,7 @@ class Select {
         msg->bind(const_cast<T*>(&x));
         chan->submit_sender(std::dynamic_pointer_cast<_impl::_chan::MessageBase>(msg));
       });
+      this->_select = nullptr;
     }
 
     void operator<<(T&& x) {
@@ -244,6 +248,7 @@ class Select {
         msg->bind(const_cast<T*>(&x));
         chan->submit_sender(std::dynamic_pointer_cast<_impl::_chan::MessageBase>(msg));
       });
+      this->_select = nullptr;
     }
 
     void operator>>(T& x) {
@@ -251,6 +256,7 @@ class Select {
         msg->bind(&x);
         chan->submit_receiver(std::dynamic_pointer_cast<_impl::_chan::MessageBase>(msg));
       });
+      this->_select = nullptr;
     }
 
    private:

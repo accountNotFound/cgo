@@ -144,22 +144,25 @@ class SemaphoreImpl {
 
 }  // namespace _impl::_sched
 
+/**
+ * @brief A copyable reference to real semaphore object
+ */
 class Semaphore {
  public:
-  Semaphore(size_t cnt) : _sem(cnt) {}
+  Semaphore(size_t cnt) : _sem(std::make_shared<_impl::_sched::SemaphoreImpl>(cnt)) {}
 
   /**
    * @brief Decrease the semaphore automatically if vacant count > 0, or suspend if count <= 0
    */
-  Coroutine<void> aquire() { return this->_sem.aquire(); }
+  Coroutine<void> aquire() { return this->_sem->aquire(); }
 
   /**
    * @brief Increase the semaphore automatically and notify another coroutine which suspend on `aquire()`
    */
-  void release() { this->_sem.release(); }
+  void release() { this->_sem->release(); }
 
  private:
-  _impl::_sched::SemaphoreImpl _sem;
+  std::shared_ptr<_impl::_sched::SemaphoreImpl> _sem;
 };
 
 class Mutex {
