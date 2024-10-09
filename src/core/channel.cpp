@@ -82,6 +82,9 @@ Coroutine<int> Select::operator()(bool with_default) {
   std::shuffle(this->_invokers.begin(), this->_invokers.end(), rng);
   for (auto& fn : this->_invokers) {
     fn();
+    if (this->_target->done) {
+      break;
+    }
   }
   if (with_default) {
     std::unique_lock guard(this->_target->mtx);

@@ -32,7 +32,8 @@ TEST(schedule, mutex) {
   for (int i = 0; i < foo_num; i++) {
     cgo::spawn([](std::atomic<int>& res, cgo::Mutex& mtx) -> cgo::Coroutine<void> {
       for (int i = 0; i < foo_loop; i++) {
-        cgo::LockGuard guard((co_await mtx.lock(), mtx));
+        co_await mtx.lock();
+        auto guard = cgo::defer([&mtx]() { mtx.unlock(); });
         res++;
         co_await cgo::yield();
       }

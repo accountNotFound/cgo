@@ -49,11 +49,11 @@ Coroutine<void> TaskExecutor::yield_running_task() {
   co_await std::suspend_always{};
 }
 
-Coroutine<void> TaskExecutor::suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& lock) {
+Coroutine<void> TaskExecutor::suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& cond_lock) {
   TaskExecutor::_suspend_q_waiting = &q_waiting;
-  TaskExecutor::_suspend_cond_lock = &lock;
+  auto mtx = TaskExecutor::_suspend_cond_lock = cond_lock.release();
   co_await std::suspend_always{};
-  lock.lock();
+  cond_lock = std::unique_lock(*mtx);
 }
 
 void TaskExecutor::execute(TaskHandler task) {
@@ -110,18 +110,20 @@ TaskHandler TaskDispatcher::dispatch(size_t p_index) {
   return task;
 }
 
-Coroutine<void> SemaphoreImpl::aquire() {
+}  // namespace _impl::_sched
+
+Coroutine<void> Semaphore::aquire() {
   std::unique_lock guard(this->_mtx);
   while (true) {
     if (this->_vacant > 0) {
       this->_vacant--;
-      co_return;
+      break;
     }
     co_await this->_cond.wait(guard);
   }
 }
 
-void SemaphoreImpl::release() {
+void Semaphore::release() {
   {
     std::unique_lock guard(this->_mtx);
     this->_vacant++;
@@ -129,26 +131,16 @@ void SemaphoreImpl::release() {
   }
 }
 
-}  // namespace _impl::_sched
-
-LockGuard::LockGuard(LockGuard&& rhs) {
-  if (this->_mtx) {
-    this->release();
-  }
-  std::swap(this->_mtx, rhs._mtx);
+DeferGuard::DeferGuard(DeferGuard&& rhs) {
+  this->drop();
+  std::swap(this->_defer, rhs._defer);
 }
 
-LockGuard::~LockGuard() {
-  if (this->_mtx) {
-    this->release();
+DeferGuard::~DeferGuard() {
+  if (this->_defer) {
+    this->_defer();
+    this->_defer = nullptr;
   }
-}
-
-Mutex& LockGuard::release() {
-  this->_mtx->unlock();
-  Mutex& ref = *this->_mtx;
-  this->_mtx = nullptr;
-  return ref;
 }
 
 }  // namespace cgo

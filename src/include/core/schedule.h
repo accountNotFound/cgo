@@ -2,6 +2,7 @@
 
 #include <any>
 #include <atomic>
+#include <functional>
 #include <list>
 #include <mutex>
 #include <queue>
@@ -88,7 +89,7 @@ class TaskExecutor {
  private:
   inline static thread_local TaskHandler _t_running = nullptr;
   inline static thread_local TaskQueue* _suspend_q_waiting = nullptr;
-  inline static thread_local std::unique_lock<Spinlock>* _suspend_cond_lock = nullptr;
+  inline static thread_local Spinlock* _suspend_cond_lock = nullptr;
   inline static thread_local bool _yield_flag = false;
 };
 
@@ -124,13 +125,13 @@ inline std::unique_ptr<TaskDispatcher> g_dispatcher = nullptr;
 
 inline TaskDispatcher& get_dispatcher() { return *g_dispatcher; }
 
-class SemaphoreImpl {
+}  // namespace _impl::_sched
+
+class Semaphore {
  public:
-  SemaphoreImpl(size_t vacant) : _vacant(vacant) {}
+  Semaphore(size_t vacant) : _vacant(vacant) {}
 
-  SemaphoreImpl(const SemaphoreImpl&) = delete;
-
-  SemaphoreImpl(SemaphoreImpl&&) = delete;
+  Semaphore(const Semaphore&) = delete;
 
   Coroutine<void> aquire();
 
@@ -142,29 +143,6 @@ class SemaphoreImpl {
   size_t _vacant;
 };
 
-}  // namespace _impl::_sched
-
-/**
- * @brief A copyable reference to real semaphore object
- */
-class Semaphore {
- public:
-  Semaphore(size_t cnt) : _sem(std::make_shared<_impl::_sched::SemaphoreImpl>(cnt)) {}
-
-  /**
-   * @brief Decrease the semaphore automatically if vacant count > 0, or suspend if count <= 0
-   */
-  Coroutine<void> aquire() { return this->_sem->aquire(); }
-
-  /**
-   * @brief Increase the semaphore automatically and notify another coroutine which suspend on `aquire()`
-   */
-  void release() { this->_sem->release(); }
-
- private:
-  std::shared_ptr<_impl::_sched::SemaphoreImpl> _sem;
-};
-
 class Mutex {
  public:
   Mutex() : _sem(1) {}
@@ -174,27 +152,26 @@ class Mutex {
   void unlock() { _sem.release(); }
 
  private:
-  _impl::_sched::SemaphoreImpl _sem;
+  Semaphore _sem;
 };
 
-/**
- * @brief Give a locked mutex for automatically unlocking later
- */
-class LockGuard {
+class DeferGuard {
  public:
-  LockGuard(Mutex& locked_mutex) : _mtx(&locked_mutex) {}
+  DeferGuard(std::function<void()>&& fn) : _defer(std::forward<std::function<void()>>(fn)) {}
 
-  LockGuard(const LockGuard&) = delete;
+  DeferGuard(const DeferGuard&) = delete;
 
-  LockGuard(LockGuard&& rhs);
+  DeferGuard(DeferGuard&&);
 
-  ~LockGuard();
+  ~DeferGuard();
 
-  Mutex& release();
+  void drop() { this->_defer = nullptr; }
 
  private:
-  Mutex* _mtx;
+  std::function<void()> _defer = nullptr;
 };
+
+inline DeferGuard defer(std::function<void()>&& fn) { return DeferGuard(std::forward<std::function<void()>>(fn)); }
 
 inline void spawn(Coroutine<void> fn) { _impl::_sched::get_dispatcher().create(std::move(fn)); }
 

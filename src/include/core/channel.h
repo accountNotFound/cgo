@@ -153,7 +153,7 @@ class ChannelMsg : public MessageBase {
 
  private:
   void* _data;
-  _impl::_sched::SemaphoreImpl _sem;
+  Semaphore _sem;
 };
 
 class SelectMsg : public MessageBase {
@@ -162,7 +162,7 @@ class SelectMsg : public MessageBase {
    public:
     Spinlock mtx;
     int rkey = -1;
-    _impl::_sched::SemaphoreImpl sem = {0};
+    Semaphore sem = {0};
     bool done = false;
   };
 
