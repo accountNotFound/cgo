@@ -129,7 +129,7 @@ inline TaskDispatcher& get_dispatcher() { return *g_dispatcher; }
 
 class Semaphore {
  public:
-  Semaphore(size_t vacant) : _vacant(vacant) {}
+  Semaphore(int vacant) : _vacant(vacant) {}
 
   Semaphore(const Semaphore&) = delete;
 
@@ -137,10 +137,12 @@ class Semaphore {
 
   void release();
 
+  int count() { return this->_vacant; }
+
  private:
   Spinlock _mtx;
   _impl::_sched::TaskCondition _cond;
-  size_t _vacant;
+  int _vacant;
 };
 
 class Mutex {

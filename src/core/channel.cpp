@@ -78,7 +78,7 @@ void SelectMsg::commit() {
 namespace cgo {
 
 Coroutine<int> Select::operator()(bool with_default) {
-  std::random_device rng;
+  std::minstd_rand rng;
   std::shuffle(this->_invokers.begin(), this->_invokers.end(), rng);
   for (auto& fn : this->_invokers) {
     fn();

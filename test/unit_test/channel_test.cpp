@@ -30,6 +30,7 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
       for (int i = 0; i < msg_num / n_reader; i++) {
         int v;
         co_await (chan >> v);
+        // printf("{%d} recv %d\n", cgo::this_coroutine_id(), v);
         add(v);
       }
       r_res.fetch_add(1);
@@ -41,6 +42,7 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
       for (int i = 0; i < msg_num / n_writer; i++) {
         int v = i;
         co_await (chan << v);
+        // printf("{%d} send %d\n", cgo::this_coroutine_id(), v);
       }
       w_res.fetch_add(1);
     }(w_res, chan, n_writer));
