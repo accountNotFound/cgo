@@ -155,8 +155,7 @@ class Select {
   template <typename T>
   class Case {
    public:
-    Case(Select& select, _impl::_chan::Channel<T>& chan, int key,
-         const std::shared_ptr<_impl::_chan::SelectReducer>& reducer)
+    Case(Select& select, _impl::_chan::Channel<T>& chan, int key, std::shared_ptr<_impl::_chan::SelectReducer>& reducer)
         : _select(&select), _chan(&chan), _key(key), _reducer(reducer) {}
 
     void operator<<(const T& x) {

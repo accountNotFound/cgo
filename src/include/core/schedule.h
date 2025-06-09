@@ -173,7 +173,9 @@ class DeferGuard {
   std::function<void()> _defer = nullptr;
 };
 
-inline DeferGuard defer(std::function<void()>&& fn) { return DeferGuard(std::forward<std::function<void()>>(fn)); }
+[[nodiscard]] inline DeferGuard defer(std::function<void()>&& fn) {
+  return DeferGuard(std::forward<std::function<void()>>(fn));
+}
 
 inline void spawn(Coroutine<void> fn) { _impl::_sched::get_dispatcher().create(std::move(fn)); }
 

@@ -47,7 +47,7 @@ ChanEvent::MoveStatus ChanEvent::to(ChanEvent& dst, MoveFn move_fn) {
     auto* m1 = &this->_select_reduce->mtx;
     auto* m2 = &dst._select_reduce->mtx;
     if (m1 == m2) {
-      // throw
+      throw std::runtime_error("selector deadlock because waiting send and recv on the same channel");
     }
     if (reinterpret_cast<size_t>(m1) > reinterpret_cast<size_t>(m2)) {
       std::swap(m1, m2);
@@ -78,14 +78,15 @@ ChanEvent::MoveStatus ChanEvent::to(ChanEvent& dst, MoveFn move_fn) {
   }
 }
 
-bool ChanEventMatcher::to(void* dst, MoveFn move_fn) {
-  while (!this->_senders.empty()) {
-    auto res = this->_senders.front().to(dst, move_fn);
+template <typename T>
+bool matcher_to(std::queue<ChanEvent>& senders, T& dst, MoveFn move_fn) {
+  while (!senders.empty()) {
+    auto res = senders.front().to(dst, move_fn);
     if (res == ChanEvent::MoveStatus::Ok) {
-      this->_senders.pop();
+      senders.pop();
       return true;
     } else if (res == ChanEvent::MoveStatus::SrcInvalid) {
-      this->_senders.pop();
+      senders.pop();
       continue;
     } else {
       break;
@@ -94,14 +95,15 @@ bool ChanEventMatcher::to(void* dst, MoveFn move_fn) {
   return false;
 }
 
-bool ChanEventMatcher::from(void* src, MoveFn move_fn) {
-  while (!this->_receivers.empty()) {
-    auto res = this->_receivers.front().from(src, move_fn);
+template <typename T>
+bool matcher_from(std::queue<ChanEvent>& receivers, T& src, MoveFn move_fn) {
+  while (!receivers.empty()) {
+    auto res = receivers.front().from(src, move_fn);
     if (res == ChanEvent::MoveStatus::Ok) {
-      this->_receivers.pop();
+      receivers.pop();
       return true;
     } else if (res == ChanEvent::MoveStatus::DstInvalid) {
-      this->_receivers.pop();
+      receivers.pop();
       continue;
     } else {
       break;
@@ -110,37 +112,13 @@ bool ChanEventMatcher::from(void* src, MoveFn move_fn) {
   return false;
 }
 
-bool ChanEventMatcher::to(ChanEvent& dst, MoveFn move_fn) {
-  while (!this->_senders.empty()) {
-    auto res = this->_senders.front().to(dst, move_fn);
-    if (res == ChanEvent::MoveStatus::Ok) {
-      this->_senders.pop();
-      return true;
-    } else if (res == ChanEvent::MoveStatus::SrcInvalid) {
-      this->_senders.pop();
-      continue;
-    } else {
-      break;
-    }
-  }
-  return false;
-}
+bool ChanEventMatcher::to(void* dst, MoveFn move_fn) { return matcher_to(this->_senders, dst, move_fn); }
 
-bool ChanEventMatcher::from(ChanEvent& src, MoveFn move_fn) {
-  while (!this->_receivers.empty()) {
-    auto res = this->_receivers.front().from(src, move_fn);
-    if (res == ChanEvent::MoveStatus::Ok) {
-      this->_receivers.pop();
-      return true;
-    } else if (res == ChanEvent::MoveStatus::DstInvalid) {
-      this->_receivers.pop();
-      continue;
-    } else {
-      break;
-    }
-  }
-  return false;
-}
+bool ChanEventMatcher::from(void* src, MoveFn move_fn) { return matcher_from(this->_receivers, src, move_fn); }
+
+bool ChanEventMatcher::to(ChanEvent& dst, MoveFn move_fn) { return matcher_to(this->_senders, dst, move_fn); }
+
+bool ChanEventMatcher::from(ChanEvent& src, MoveFn move_fn) { return matcher_from(this->_receivers, src, move_fn); }
 
 }  // namespace cgo::_impl::_chan
 

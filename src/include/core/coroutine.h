@@ -47,8 +47,21 @@ class ValuePromiseBase : public PromiseBase {
  public:
   void return_value(T&& value) { this->_value = std::move(value); }
 
+  T get_value() { return std::move(this->_value); }
+
  protected:
   T _value;
+};
+
+template <typename T>
+class RefPromiseBase : public PromiseBase {
+ public:
+  void return_value(T& value) { this->_value = &value; }
+
+  T& get_value() { return *this->_value; }
+
+ protected:
+  T* _value;
 };
 
 }  // namespace cgo::_impl::_coro
@@ -59,7 +72,9 @@ template <typename T>
 class Coroutine {
  public:
   struct promise_type
-      : public std::conditional_t<std::is_void_v<T>, _impl::_coro::VoidPromiseBase, _impl::_coro::ValuePromiseBase<T>> {
+      : public std::conditional_t<std::is_void_v<T>, _impl::_coro::VoidPromiseBase,
+                                  std::conditional_t<std::is_reference_v<T>, _impl::_coro::RefPromiseBase<std::remove_reference_t<T>>,
+                                                     _impl::_coro::ValuePromiseBase<T>>> {
     friend class Coroutine;
 
    public:
@@ -82,9 +97,16 @@ class Coroutine {
   }
 
   void resume() {
-    this->_promise()._stack->top().resume();
-    if (auto& ex = this->_promise()._exception; ex) {
-      std::rethrow_exception(ex);
+    while (true) {
+      size_t d = this->_promise()._stack->size();
+      this->_promise()._stack->top().resume();
+
+      if (auto& ex = this->_promise()._exception; ex) {
+        std::rethrow_exception(ex);
+      }
+      if (this->_promise()._stack->size() <= d) {
+        break;
+      }
     }
   }
 
@@ -92,10 +114,9 @@ class Coroutine {
 
   bool await_ready() { return this->done(); }
 
-  std::coroutine_handle<> await_suspend(std::coroutine_handle<> caller) {
+  void await_suspend(std::coroutine_handle<> caller) {
     promise_type& promise = std::coroutine_handle<promise_type>::from_address(caller.address()).promise();
     (this->_promise()._stack = promise._stack)->push(this->_handler);
-    return this->_handler;
   }
 
   T await_resume() {
@@ -103,7 +124,7 @@ class Coroutine {
       std::rethrow_exception(ex);
     }
     if constexpr (!std::is_same_v<T, void>) {
-      return std::move(this->_promise()._value);
+      return std::move(this->_promise().get_value());
     }
   }
 
