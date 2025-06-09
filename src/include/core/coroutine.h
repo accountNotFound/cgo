@@ -7,28 +7,11 @@
 
 namespace cgo::_impl::_coro {
 
-struct SwitchTo {
- public:
-  SwitchTo(std::coroutine_handle<> target) : _target(target) {}
-
-  bool await_ready() const noexcept { return false; }
-
-  std::coroutine_handle<> await_suspend(std::coroutine_handle<>) const noexcept { return this->_target; }
-
-  void await_resume() const noexcept {}
-
- private:
-  std::coroutine_handle<> _target;
-};
-
 class PromiseBase {
  public:
   std::suspend_always initial_suspend() noexcept { return {}; }
 
-  SwitchTo final_suspend() noexcept {
-    this->_stack->pop();
-    return SwitchTo(this->_stack->empty() ? std::noop_coroutine() : this->_stack->top());
-  }
+  std::suspend_always final_suspend() noexcept { return {}; }
 
   void unhandled_exception() noexcept { this->_exception = std::current_exception(); }
 
@@ -53,17 +36,6 @@ class ValuePromiseBase : public PromiseBase {
   T _value;
 };
 
-template <typename T>
-class RefPromiseBase : public PromiseBase {
- public:
-  void return_value(T& value) { this->_value = &value; }
-
-  T& get_value() { return *this->_value; }
-
- protected:
-  T* _value;
-};
-
 }  // namespace cgo::_impl::_coro
 
 namespace cgo {
@@ -72,12 +44,14 @@ template <typename T>
 class Coroutine {
  public:
   struct promise_type
-      : public std::conditional_t<std::is_void_v<T>, _impl::_coro::VoidPromiseBase,
-                                  std::conditional_t<std::is_reference_v<T>, _impl::_coro::RefPromiseBase<std::remove_reference_t<T>>,
-                                                     _impl::_coro::ValuePromiseBase<T>>> {
+      : public std::conditional_t<std::is_void_v<T>, _impl::_coro::VoidPromiseBase, _impl::_coro::ValuePromiseBase<T>> {
     friend class Coroutine;
 
    public:
+    static promise_type& from(std::coroutine_handle<> h) {
+      return std::coroutine_handle<promise_type>::from_address(h.address()).promise();
+    }
+
     Coroutine get_return_object() { return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this)); }
   };
 
@@ -97,17 +71,24 @@ class Coroutine {
   }
 
   void resume() {
-    while (true) {
-      size_t d = this->_promise()._stack->size();
-      this->_promise()._stack->top().resume();
-
-      if (auto& ex = this->_promise()._exception; ex) {
-        std::rethrow_exception(ex);
+    std::stack<std::coroutine_handle<>>& stk = *this->_promise()._stack;
+    std::coroutine_handle<> current;
+    do {
+      current = stk.top();
+      current.resume();
+      if (auto& ex = promise_type::from(current)._exception; ex) {
+        stk.pop();
+        if (stk.empty()) {
+          std::rethrow_exception(ex);
+        }
+        promise_type::from(stk.top())._exception = ex;
+        continue;
       }
-      if (this->_promise()._stack->size() <= d) {
-        break;
+      if (current.done()) {
+        stk.pop();
+        continue;
       }
-    }
+    } while (!stk.empty() && stk.top() != current);
   }
 
   bool done() { return this->_handler.done(); }
@@ -115,8 +96,7 @@ class Coroutine {
   bool await_ready() { return this->done(); }
 
   void await_suspend(std::coroutine_handle<> caller) {
-    promise_type& promise = std::coroutine_handle<promise_type>::from_address(caller.address()).promise();
-    (this->_promise()._stack = promise._stack)->push(this->_handler);
+    (this->_promise()._stack = promise_type::from(caller)._stack)->push(this->_handler);
   }
 
   T await_resume() {
