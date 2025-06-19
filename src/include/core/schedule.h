@@ -45,9 +45,9 @@ class TaskHandler {
 
   std::vector<std::any>& locals() const { return this->_task->locals; }
 
-  bool done() const { return this->_task->fn.done(); }
+  bool done() const { return _impl::_coro::done(this->_task->fn); }
 
-  void resume() { this->_task->fn.resume(); }
+  void resume() { _impl::_coro::resume(this->_task->fn); }
 
  private:
   Task* _task = nullptr;

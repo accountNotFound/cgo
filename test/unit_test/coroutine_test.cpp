@@ -37,10 +37,10 @@ cgo::Coroutine<void> biz(int n) {
 TEST(coroutine, suspend) {
   suspend_cnt = 0;
   auto f = biz(bar_throw_threshold);
-  f.init();
-  for (int i = 0; !f.done(); i++) {
+  cgo::_impl::_coro::init(f);
+  for (int i = 0; !cgo::_impl::_coro::done(f); i++) {
     // printf("main\n");
-    f.resume();
+    cgo::_impl::_coro::resume(f);
     ASSERT(suspend_cnt == i, "suspend failed");
   }
 }
@@ -48,13 +48,13 @@ TEST(coroutine, suspend) {
 TEST(coroutine, catch_exception) {
   suspend_cnt = 0;
   auto f = biz(bar_throw_threshold * 2);
-  f.init();
-  for (int i = 0; !f.done(); i++) {
+  cgo::_impl::_coro::init(f);
+  for (int i = 0; !cgo::_impl::_coro::done(f); i++) {
     // printf("main\n");
     if (i >= bar_throw_threshold) {
-      ASSERT_RAISE(f.resume(), int, "catch exception failed");
+      ASSERT_RAISE(cgo::_impl::_coro::resume(f), int, "catch exception failed");
     } else {
-      f.resume();
+      cgo::_impl::_coro::resume(f);
     }
     ASSERT(suspend_cnt == i, "suspend failed");
   }
@@ -70,7 +70,7 @@ cgo::Coroutine<int> count(int n) {
 TEST(coroutine, fake_recursion) {
   int num = 1e6;
   auto f = count(num);
-  f.init();
-  f.resume();
+  cgo::_impl::_coro::init(f);
+  cgo::_impl::_coro::resume(f);
   ASSERT(f.await_resume() == num, "fake recursion failed");
 }

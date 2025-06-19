@@ -12,7 +12,7 @@ void Spinlock::lock() {
 namespace _impl::_sched {
 
 TaskHandler TaskAllocator::create(int id, Coroutine<void> fn) {
-  fn.init();
+  _impl::_coro::init(fn);
   {
     std::unique_lock guard(this->_mtx);
     this->_index[id] = this->_pool.emplace(this->_pool.end(), id, std::move(fn));
