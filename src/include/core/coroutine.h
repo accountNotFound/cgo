@@ -57,6 +57,8 @@ class CoroutineBase {
   friend void resume(CoroutineBase& fn);
 
  protected:
+  virtual ~CoroutineBase() = default;
+
   virtual std::coroutine_handle<> _handler() = 0;
 
   virtual PromiseBase& _promise() = 0;
