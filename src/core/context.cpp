@@ -35,11 +35,11 @@ void Context::run_worker(size_t index) {
 
     bool timer_flag = false;
     auto wait_timeout = std::chrono::milliseconds::max();
-    if (auto timer = _impl::_time::get_dispatcher().dispatch(index); timer) {
-      timer.fn();
+    if (auto delayed = _impl::_time::get_dispatcher().dispatch(index); delayed) {
+      delayed.fn();
       timer_flag = true;
     } else {
-      wait_timeout = std::chrono::duration_cast<decltype(wait_timeout)>(timer.ex - std::chrono::steady_clock::now());
+      wait_timeout = std::chrono::duration_cast<decltype(wait_timeout)>(delayed.ex - std::chrono::steady_clock::now());
     }
 
     if (sched_flag || timer_flag) {
@@ -60,7 +60,7 @@ void start_context(size_t n_worker) {
   }
   _impl::_ctx::g_context = std::make_unique<_impl::_ctx::Context>();
   _impl::_sched::g_dispatcher = std::make_unique<_impl::_sched::TaskDispatcher>(n_worker);
-  _impl::_time::g_dispatcher = std::make_unique<_impl::_time::TimerDispatcher>(n_worker);
+  _impl::_time::g_dispatcher = std::make_unique<_impl::_time::DelayedDispatcher>(n_worker);
   _impl::_ctx::get_context().start(n_worker);
 }
 

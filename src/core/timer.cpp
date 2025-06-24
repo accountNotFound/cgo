@@ -2,7 +2,7 @@
 
 namespace cgo::_impl::_time {
 
-void TimerQueue::push(Timer&& timer) {
+void DelayedQueue::push(Delayed&& timer) {
   std::unique_lock guard(this->_mtx);
   if (this->_pq_timer.empty() || timer < this->_pq_timer.top()) {
     if (this->_signal) {
@@ -12,17 +12,17 @@ void TimerQueue::push(Timer&& timer) {
   this->_pq_timer.push(std::move(timer));
 }
 
-Timer TimerQueue::pop() {
+Delayed DelayedQueue::pop() {
   std::unique_lock guard(this->_mtx);
   if (!this->_pq_timer.empty() && std::chrono::steady_clock::now() >= this->_pq_timer.top().ex) {
-    auto timer = std::move(const_cast<Timer&>(this->_pq_timer.top()));
+    auto timer = std::move(const_cast<Delayed&>(this->_pq_timer.top()));
     this->_pq_timer.pop();
     return timer;
   }
   if (!this->_pq_timer.empty()) {
-    return Timer(-1, nullptr, this->_pq_timer.top().ex);
+    return Delayed(-1, nullptr, this->_pq_timer.top().ex);
   }
-  return Timer(-1, nullptr, Timer::TimePoint::max());
+  return Delayed(-1, nullptr, Delayed::TimePoint::max());
 }
 
 void TimerDispatcher::submit(std::function<void()>&& fn, const std::chrono::duration<double, std::milli>& timeout) {
@@ -30,10 +30,10 @@ void TimerDispatcher::submit(std::function<void()>&& fn, const std::chrono::dura
   int slot = id % this->_q_timers.size();
   auto steady_timeout = std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout);
   auto ex_tp = std::chrono::steady_clock::now() + steady_timeout;
-  this->_q_timers[slot].push(Timer(id, std::move(fn), ex_tp));
+  this->_q_timers[slot].push(Delayed(id, std::move(fn), ex_tp));
 }
 
-Timer TimerDispatcher::dispatch(size_t p_index) {
+Delayed TimerDispatcher::dispatch(size_t p_index) {
   for (int i = 0; i < this->_q_timers.size(); ++i) {
     if (auto timer = this->_q_timers[i].pop(); timer) {
       return timer;

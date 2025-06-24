@@ -1,5 +1,6 @@
 #include "core/timer.h"
 
+#include "core/channel.h"
 #include "core/context.h"
 #include "mtest.h"
 
@@ -7,12 +8,15 @@ const size_t exec_num = 4;
 const size_t foo_num = 10000;
 const size_t foo_loop = 100;
 
+cgo::Mutex mtx;
 std::atomic<size_t> end_num = 0;
 
 cgo::Coroutine<void> foo(std::chrono::milliseconds wait_ms) {
   for (int i = 0; i < foo_loop; ++i) {
     co_await cgo::sleep(wait_ms);
   }
+  co_await mtx.lock();
+  auto guard = cgo::defer([]() { mtx.unlock(); });
   end_num.fetch_add(1);
 }
 
@@ -20,7 +24,8 @@ TEST(timer, sleep) {
   auto begin = std::chrono::steady_clock::now();
   cgo::start_context(exec_num);
   for (int i = 0; i < foo_num; ++i) {
-    auto ms = std::chrono::milliseconds(i % 100 + 1);
+    int r = std::rand() % 100 + 1;
+    auto ms = std::chrono::milliseconds(r);
     cgo::spawn(foo(ms));
   }
 
