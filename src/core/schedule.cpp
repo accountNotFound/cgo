@@ -127,7 +127,7 @@ void TaskDispatcher::submit(TaskHandler task) {
 
 TaskHandler TaskDispatcher::dispatch(size_t p_index) {
   TaskHandler task = nullptr;
-  for (int i = 0; !task && i < this->_q_runnables.size(); i++) {
+  for (int i = 0; !task && i < this->_q_runnables.size(); ++i) {
     int slot = (p_index + i) % this->_q_runnables.size();
     task = this->_q_runnables[slot].pop();
   }

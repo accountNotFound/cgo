@@ -1,0 +1,55 @@
+#include "core/timer.h"
+
+namespace cgo::_impl::_time {
+
+void TimerQueue::push(Timer&& timer) {
+  std::unique_lock guard(this->_mtx);
+  if (this->_pq_timer.empty() || timer < this->_pq_timer.top()) {
+    if (this->_signal) {
+      this->_signal->notify();
+    }
+  }
+  this->_pq_timer.push(std::move(timer));
+}
+
+Timer TimerQueue::pop() {
+  std::unique_lock guard(this->_mtx);
+  if (!this->_pq_timer.empty() && std::chrono::steady_clock::now() >= this->_pq_timer.top().ex) {
+    auto timer = std::move(const_cast<Timer&>(this->_pq_timer.top()));
+    this->_pq_timer.pop();
+    return timer;
+  }
+  if (!this->_pq_timer.empty()) {
+    return Timer(-1, nullptr, this->_pq_timer.top().ex);
+  }
+  return Timer(-1, nullptr, Timer::TimePoint::max());
+}
+
+void TimerDispatcher::submit(std::function<void()>&& fn, const std::chrono::duration<double, std::milli>& timeout) {
+  int id = this->_gid.fetch_add(1);
+  int slot = id % this->_q_timers.size();
+  auto steady_timeout = std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout);
+  auto ex_tp = std::chrono::steady_clock::now() + steady_timeout;
+  this->_q_timers[slot].push(Timer(id, std::move(fn), ex_tp));
+}
+
+Timer TimerDispatcher::dispatch(size_t p_index) {
+  for (int i = 0; i < this->_q_timers.size(); ++i) {
+    if (auto timer = this->_q_timers[i].pop(); timer) {
+      return timer;
+    }
+  }
+  return this->_q_timers[p_index].pop();
+}
+
+}  // namespace cgo::_impl::_time
+
+namespace cgo {
+
+Coroutine<void> sleep(const std::chrono::duration<double, std::milli>& timeout) {
+  Semaphore sem(0);
+  _impl::_time::get_dispatcher().submit([&sem]() { sem.release(); }, timeout);
+  co_await sem.aquire();
+}
+
+}  // namespace cgo
