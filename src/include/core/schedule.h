@@ -2,6 +2,7 @@
 
 #include <any>
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <list>
 #include <mutex>
@@ -21,6 +22,22 @@ class Spinlock {
 
  private:
   std::atomic<bool> _flag = false;
+};
+
+/**
+ * @brief Simple wrapper of condition variable. Notice that signal from `notify()` may be lost
+ */
+class Signal {
+ public:
+  void notify();
+
+  void wait(const std::chrono::duration<double, std::milli>& duration);
+
+ private:
+  Spinlock _mtx;
+  std::condition_variable_any _cond;
+  bool _signal_flag = false;
+  bool _wait_flag = false;
 };
 
 namespace _impl::_sched {
@@ -71,9 +88,12 @@ class TaskQueue {
 
   TaskHandler pop();
 
+  void regist(Signal& signal) { this->_signal = &signal; }
+
  private:
   Spinlock _mtx;
   std::queue<TaskHandler> _que;
+  Signal* _signal = nullptr;
 };
 
 class TaskExecutor {
@@ -105,7 +125,7 @@ class TaskCondition {
 
 class TaskDispatcher {
  public:
-  TaskDispatcher(size_t n_partition = 0) : _t_allocs(n_partition), _q_runnables(n_partition) {}
+  TaskDispatcher(size_t n_partition) : _t_allocs(n_partition), _q_runnables(n_partition) {}
 
   void create(Coroutine<void> fn);
 
@@ -114,6 +134,8 @@ class TaskDispatcher {
   void submit(TaskHandler task);
 
   TaskHandler dispatch(size_t p_index);
+
+  void regist(size_t p_index, Signal& signal) { this->_q_runnables[p_index].regist(signal); }
 
  private:
   std::atomic<int> _tid;

@@ -20,12 +20,14 @@ void Context::stop() {
 }
 
 void Context::run_worker(size_t index) {
+  Signal signal;
+  _impl::_sched::get_dispatcher().regist(index, signal);
   while (!this->_finished) {
     if (auto task = _impl::_sched::get_dispatcher().dispatch(index); task) {
       _impl::_sched::TaskExecutor::execute(task);
       continue;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    signal.wait(std::chrono::milliseconds(50));
   }
 }
 

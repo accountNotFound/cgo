@@ -9,6 +9,27 @@ void Spinlock::lock() {
   }
 }
 
+void Signal::notify() {
+  if (this->_wait_flag && !this->_signal_flag) {
+    std::unique_lock guard(this->_mtx);
+    if (this->_wait_flag && !this->_signal_flag) {
+      this->_cond.notify_one();
+      this->_signal_flag = true;
+    }
+  }
+}
+
+void Signal::wait(const std::chrono::duration<double, std::milli>& duration) {
+  if (!this->_signal_flag) {
+    std::unique_lock guard(this->_mtx);
+    if (!this->_signal_flag) {
+      this->_wait_flag = true;
+      this->_cond.wait_for(guard, duration);
+      this->_wait_flag = false;
+    }
+  }
+}
+
 namespace _impl::_sched {
 
 TaskHandler TaskAllocator::create(int id, Coroutine<void> fn) {
@@ -32,6 +53,9 @@ void TaskAllocator::destroy(TaskHandler task) {
 void TaskQueue::push(TaskHandler task) {
   std::unique_lock guard(this->_mtx);
   this->_que.push(task);
+  if (this->_signal) {
+    this->_signal->notify();
+  }
 }
 
 TaskHandler TaskQueue::pop() {
