@@ -47,17 +47,17 @@ class DelayedQueue {
 
 class DelayedDispatcher {
  public:
-  DelayedDispatcher(size_t n_partition) : _gid(0), _q_timers(n_partition) {}
+  DelayedDispatcher(size_t n_partition) : _gid(0), _pq_timers(n_partition) {}
 
   void submit(std::function<void()>&& fn, const std::chrono::duration<double, std::milli>& timeout);
 
   Delayed dispatch(size_t p_index);
 
-  void regist(size_t p_index, Signal& signal) { this->_q_timers[p_index].regist(signal); }
+  void regist(size_t p_index, Signal& signal) { this->_pq_timers[p_index].regist(signal); }
 
  private:
   std::atomic<int> _gid;
-  std::vector<DelayedQueue> _q_timers;
+  std::vector<DelayedQueue> _pq_timers;
 };
 
 inline std::unique_ptr<DelayedDispatcher> g_dispatcher = nullptr;

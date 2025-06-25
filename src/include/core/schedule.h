@@ -24,16 +24,13 @@ class Spinlock {
   std::atomic<bool> _flag = false;
 };
 
-/**
- * @brief Simple wrapper of condition variable. Notice that signal from `notify()` may be lost
- */
 class Signal {
  public:
-  void notify();
+  virtual void emit();
 
-  void wait(const std::chrono::duration<double, std::milli>& duration);
+  virtual void wait(const std::chrono::duration<double, std::milli>& duration);
 
- private:
+ protected:
   Spinlock _mtx;
   std::condition_variable_any _cond;
   bool _signal_flag = false;

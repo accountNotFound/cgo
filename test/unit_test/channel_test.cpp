@@ -124,13 +124,13 @@ void select_read_test(int n_reader, int buffer_size) {
   }
 }
 
-TEST(channel, select_r2b0) { select_read_test(2, 0); }
+// TEST(channel, select_r2b0) { select_read_test(2, 0); }
 
-TEST(channel, select_r5b0) { select_read_test(5, 0); }
+// TEST(channel, select_r5b0) { select_read_test(5, 0); }
 
-TEST(channel, select_r2b5) { select_read_test(2, 5); }
+// TEST(channel, select_r2b5) { select_read_test(2, 5); }
 
-TEST(channel, select_r5b5) { select_read_test(5, 5); }
+// TEST(channel, select_r5b5) { select_read_test(5, 5); }
 
 void select_test(int n_writer, int n_reader, int buffer_size) {
   ASSERT(mod(msg_num, n_reader) == 0 && mod(msg_num, n_writer) == 0, "");

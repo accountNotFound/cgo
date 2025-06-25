@@ -4,12 +4,12 @@ namespace cgo {
 
 void Spinlock::lock() {
   bool expected = false;
-  while (!_flag.compare_exchange_weak(expected, true)) {
+  while (!this->_flag.compare_exchange_weak(expected, true)) {
     expected = false;
   }
 }
 
-void Signal::notify() {
+void Signal::emit() {
   if (this->_wait_flag && !this->_signal_flag) {
     std::unique_lock guard(this->_mtx);
     if (this->_wait_flag && !this->_signal_flag) {
@@ -23,6 +23,7 @@ void Signal::wait(const std::chrono::duration<double, std::milli>& duration) {
   if (!this->_signal_flag) {
     std::unique_lock guard(this->_mtx);
     if (!this->_signal_flag) {
+      this->_signal_flag = false;
       this->_wait_flag = true;
       this->_cond.wait_for(guard, duration);
       this->_wait_flag = false;
@@ -54,7 +55,7 @@ void TaskQueue::push(TaskHandler task) {
   std::unique_lock guard(this->_mtx);
   this->_que.push(task);
   if (this->_signal) {
-    this->_signal->notify();
+    this->_signal->emit();
   }
 }
 
