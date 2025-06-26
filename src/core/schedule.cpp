@@ -9,7 +9,9 @@ void Spinlock::lock() {
   }
 }
 
-void Signal::emit() {
+namespace _impl {
+
+void SignalBase::emit() {
   if (this->_wait_flag && !this->_signal_flag) {
     std::unique_lock guard(this->_mtx);
     if (this->_wait_flag && !this->_signal_flag) {
@@ -19,7 +21,7 @@ void Signal::emit() {
   }
 }
 
-void Signal::wait(const std::chrono::duration<double, std::milli>& duration) {
+void SignalBase::wait(const std::chrono::duration<double, std::milli>& duration) {
   if (!this->_signal_flag) {
     std::unique_lock guard(this->_mtx);
     if (!this->_signal_flag) {
@@ -30,6 +32,8 @@ void Signal::wait(const std::chrono::duration<double, std::milli>& duration) {
     }
   }
 }
+
+}  // namespace _impl
 
 namespace _impl::_sched {
 

@@ -2,6 +2,7 @@
 
 #include <iostream>
 
+#include "core/event.h"
 #include "core/timer.h"
 
 namespace cgo::_impl::_ctx {
@@ -22,10 +23,13 @@ void Context::stop() {
 }
 
 void Context::run_worker(size_t index) {
-  Signal signal;
+  _impl::_event::EventSignal signal(index, /*batch_size=*/64);
+  auto guard = defer([&signal]() { signal.close(); });
+
   _impl::_sched::get_dispatcher().regist(index, signal);
   _impl::_time::get_dispatcher().regist(index, signal);
 
+  auto handle_time = std::chrono::steady_clock::now();
   while (!this->_finished) {
     bool sched_flag = false;
     if (auto task = _impl::_sched::get_dispatcher().dispatch(index); task) {
@@ -43,9 +47,14 @@ void Context::run_worker(size_t index) {
     }
 
     if (sched_flag || timer_flag) {
-      continue;
+      auto now = std::chrono::steady_clock::now();
+      if (now - handle_time > std::chrono::milliseconds(1)) {
+        signal.wait_event_proc(std::chrono::milliseconds(0));
+        handle_time = now;
+      }
+    } else {
+      signal.wait_event_proc(std::min(std::chrono::milliseconds(50), wait_timeout));
     }
-    signal.wait(std::min(std::chrono::milliseconds(50), wait_timeout));
   }
 }
 
@@ -61,11 +70,13 @@ void start_context(size_t n_worker) {
   _impl::_ctx::g_context = std::make_unique<_impl::_ctx::Context>();
   _impl::_sched::g_dispatcher = std::make_unique<_impl::_sched::TaskDispatcher>(n_worker);
   _impl::_time::g_dispatcher = std::make_unique<_impl::_time::DelayedDispatcher>(n_worker);
+  _impl::_event::g_dispatcher = std::make_unique<_impl::_event::EventDispatcher>(n_worker);
   _impl::_ctx::get_context().start(n_worker);
 }
 
 void stop_context() {
   _impl::_ctx::get_context().stop();
+  _impl::_event::g_dispatcher = nullptr;
   _impl::_time::g_dispatcher = nullptr;
   _impl::_sched::g_dispatcher = nullptr;
   _impl::_ctx::g_context = nullptr;

@@ -36,13 +36,13 @@ class DelayedQueue {
 
   Delayed pop();
 
-  void regist(Signal& signal) { this->_signal = &signal; }
+  void regist(_impl::SignalBase& signal) { this->_signal = &signal; }
 
  private:
  private:
   Spinlock _mtx;
   std::priority_queue<Delayed, std::vector<Delayed>, std::greater<Delayed>> _pq_timer;
-  Signal* _signal;
+  _impl::SignalBase* _signal;
 };
 
 class DelayedDispatcher {
@@ -53,7 +53,7 @@ class DelayedDispatcher {
 
   Delayed dispatch(size_t p_index);
 
-  void regist(size_t p_index, Signal& signal) { this->_pq_timers[p_index].regist(signal); }
+  void regist(size_t p_index, _impl::SignalBase& signal) { this->_pq_timers[p_index].regist(signal); }
 
  private:
   std::atomic<int> _gid;

@@ -18,13 +18,15 @@ class Spinlock {
  public:
   void lock();
 
-  void unlock() { _flag.store(false); }
+  void unlock() { this->_flag.store(false); }
 
  private:
   std::atomic<bool> _flag = false;
 };
 
-class Signal {
+namespace _impl {
+
+class SignalBase {
  public:
   virtual void emit();
 
@@ -36,6 +38,8 @@ class Signal {
   bool _signal_flag = false;
   bool _wait_flag = false;
 };
+
+}  // namespace _impl
 
 namespace _impl::_sched {
 
@@ -85,12 +89,12 @@ class TaskQueue {
 
   TaskHandler pop();
 
-  void regist(Signal& signal) { this->_signal = &signal; }
+  void regist(_impl::SignalBase& signal) { this->_signal = &signal; }
 
  private:
   Spinlock _mtx;
   std::queue<TaskHandler> _que;
-  Signal* _signal = nullptr;
+  _impl::SignalBase* _signal = nullptr;
 };
 
 class TaskExecutor {
@@ -132,7 +136,7 @@ class TaskDispatcher {
 
   TaskHandler dispatch(size_t p_index);
 
-  void regist(size_t p_index, Signal& signal) { this->_q_runnables[p_index].regist(signal); }
+  void regist(size_t p_index, SignalBase& signal) { this->_q_runnables[p_index].regist(signal); }
 
  private:
   std::atomic<int> _tid;
