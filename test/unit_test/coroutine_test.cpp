@@ -18,7 +18,7 @@ cgo::Coroutine<int> bar(int n) {
     co_await std::suspend_always{};
     suspend_cnt++;
   }
-  co_return std::move(res);
+  co_return res;
 }
 
 cgo::Coroutine<std::any> foo(int n) {

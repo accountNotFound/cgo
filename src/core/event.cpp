@@ -75,7 +75,7 @@ void EventHandler::add(Fd fd, Event on, std::function<void(Event)>&& callback) {
   ev.events = Event::to_linux(on) | ::EPOLLET;
   ev.data.fd = fd;
   if (::epoll_ctl(this->_fd, EPOLL_CTL_ADD, fd, &ev) == 0) {
-    this->_fd_calls[fd] = std::move(callback);
+    this->_fd_calls[fd] = std::forward<decltype(callback)>(callback);
   }
 }
 

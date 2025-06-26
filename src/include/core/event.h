@@ -79,7 +79,7 @@ class EventDispatcher {
  public:
   EventDispatcher(size_t n_partition) : _handlers(n_partition) {}
 
-  void add(Fd fd, Event ev, std::function<void(Event)>&& callback) { this->_loc(fd).add(fd, ev, std::move(callback)); }
+  void add(Fd fd, Event ev, std::function<void(Event)>&& callback) { this->_loc(fd).add(fd, ev, std::forward<decltype(callback)>(callback)); }
 
   void mod(Fd fd, Event ev) { this->_loc(fd).mod(fd, ev); }
 

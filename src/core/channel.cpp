@@ -138,7 +138,7 @@ Coroutine<int> Select::operator()(bool with_default) {
   }
   std::unique_lock guard(this->_reducer->mtx);
   this->_reducer->done = true;
-  co_return std::move(this->_reducer->key);
+  co_return this->_reducer->key;
 }
 
 }  // namespace cgo

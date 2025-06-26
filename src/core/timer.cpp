@@ -9,7 +9,7 @@ void DelayedQueue::push(Delayed&& timer) {
       this->_signal->emit();
     }
   }
-  this->_pq_timer.push(std::move(timer));
+  this->_pq_timer.push(std::forward<Delayed>(timer));
 }
 
 Delayed DelayedQueue::pop() {
@@ -30,7 +30,7 @@ void DelayedDispatcher::submit(std::function<void()>&& fn, const std::chrono::du
   int slot = id % this->_pq_timers.size();
   auto steady_timeout = std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout);
   auto ex_tp = std::chrono::steady_clock::now() + steady_timeout;
-  this->_pq_timers[slot].push(Delayed(id, std::move(fn), ex_tp));
+  this->_pq_timers[slot].push(Delayed(id, std::forward<decltype(fn)>(fn), ex_tp));
 }
 
 Delayed DelayedDispatcher::dispatch(size_t p_index) {

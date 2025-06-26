@@ -40,10 +40,17 @@ class VoidPromiseBase : public PromiseBase {
 template <typename T>
 class ValuePromiseBase : public PromiseBase {
  public:
-  void return_value(T&& value) { this->_value = std::forward<T>(value); }
+  void return_value(T& value) { this->_value = value; }
+
+  void return_value(T&& value) { this->_value = std::move(value); }
+
+  std::suspend_always yield_value(T& value) {
+    this->_value = value;
+    return {};
+  }
 
   std::suspend_always yield_value(T&& value) {
-    this->_value = std::forward<T>(value);
+    this->_value = std::move(value);
     return {};
   }
 
@@ -68,6 +75,9 @@ class CoroutineBase {
 
 namespace cgo {
 
+/**
+ * @note This class has no Return Value Optimization when `co_return`. So `co_return std::move(...)` if necessary
+ */
 template <typename T>
 class Coroutine : public _impl::_coro::CoroutineBase {
  public:

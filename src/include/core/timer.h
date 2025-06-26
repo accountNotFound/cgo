@@ -16,7 +16,7 @@ struct Delayed {
 
   Delayed() : _id(-1), fn(nullptr), ex() {}
 
-  Delayed(int id, Callback&& fn, const TimePoint& ex) : _id(id), fn(std::move(fn)), ex(ex) {}
+  Delayed(int id, Callback&& fn, const TimePoint& ex) : _id(id), fn(std::forward<decltype(fn)>(fn)), ex(ex) {}
 
   operator bool() const { return this->_id >= 0; }
 
