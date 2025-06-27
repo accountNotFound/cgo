@@ -21,6 +21,8 @@ class PromiseBase {
   friend void resume(CoroutineBase& fn);
 
  public:
+  virtual ~PromiseBase() = default;
+
   std::suspend_always initial_suspend() noexcept { return {}; }
 
   std::suspend_always final_suspend() noexcept { return {}; }
@@ -58,14 +60,29 @@ class ValuePromiseBase : public PromiseBase {
   T _value;
 };
 
+template <typename T>
+class ValuePromiseBase<T&> : public PromiseBase {
+ public:
+  void return_value(T& value) { this->_value = &value; }
+
+  std::suspend_always yield_value(T& value) {
+    this->_value = &value;
+    return {};
+  }
+
+ protected:
+  T* _value = nullptr;
+};
+
 class CoroutineBase {
   friend void init(CoroutineBase& fn);
   friend bool done(CoroutineBase& fn);
   friend void resume(CoroutineBase& fn);
 
- protected:
+ public:
   virtual ~CoroutineBase() = default;
 
+ protected:
   virtual std::coroutine_handle<> _handler() = 0;
 
   virtual PromiseBase& _promise() = 0;
@@ -108,16 +125,20 @@ class Coroutine : public _impl::_coro::CoroutineBase {
     (this->_type_handler.promise()._stack = promise._stack)->push(this->_type_handler);
   }
 
-  T await_resume() {
+  auto await_resume() {
     if (auto& ex = this->_type_handler.promise()._exception; ex) {
       std::rethrow_exception(ex);
     }
     if constexpr (!std::is_void_v<T>) {
-      return std::move(this->_type_handler.promise()._value);
+      if constexpr (std::is_reference_v<T>) {
+        return std::ref(*this->_type_handler.promise()._value);
+      } else {
+        return std::move(this->_type_handler.promise()._value);
+      }
     }
   }
 
- private:
+ protected:
   Coroutine(std::coroutine_handle<promise_type> handler) : _type_handler(handler) {}
 
   void _drop() {

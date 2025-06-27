@@ -74,3 +74,22 @@ TEST(coroutine, fake_recursion) {
   cgo::_impl::_coro::resume(f);
   ASSERT(f.await_resume() == num, "fake recursion failed");
 }
+
+int val = 0;
+
+cgo::Coroutine<int&> get_ref() { co_return val; }
+
+cgo::Coroutine<void> set_ref() {
+  int& v = co_await get_ref();
+  ASSERT(v == 0, "");
+  v = 100;
+  ASSERT(val == 100, "");
+}
+
+TEST(coroutine, return_ref) {
+  auto f = set_ref();
+  cgo::_impl::_coro::init(f);
+  while (!cgo::_impl::_coro::done(f)) {
+    cgo::_impl::_coro::resume(f);
+  }
+}
