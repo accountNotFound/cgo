@@ -79,14 +79,14 @@ class CoroutineBase {
  public:
   virtual ~CoroutineBase() = default;
 
-  virtual PromiseBase& _promise() = 0;
+  virtual PromiseBase& promise() = 0;
 };
 
-inline void init(CoroutineBase& fn) { PromiseBase::init(&fn._promise()); }
+inline void init(CoroutineBase& fn) { PromiseBase::init(&fn.promise()); }
 
-inline void resume(CoroutineBase& fn) { PromiseBase::resume(&fn._promise()); }
+inline void resume(CoroutineBase& fn) { PromiseBase::resume(&fn.promise()); }
 
-inline bool done(CoroutineBase& fn) { return PromiseBase::done(&fn._promise()); }
+inline bool done(CoroutineBase& fn) { return PromiseBase::done(&fn.promise()); }
 
 }  // namespace cgo::_impl::_coro
 
@@ -105,11 +105,14 @@ class Coroutine : public _impl::_coro::CoroutineBase {
    public:
     promise_type() { this->_handler = std::coroutine_handle<promise_type>::from_promise(*this); }
 
-    Coroutine get_return_object() { return Coroutine(this->_handler); }
+    Coroutine get_return_object() { return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this)); }
 
    protected:
     using _impl::_coro::PromiseBase::call_pop;
     using _impl::_coro::PromiseBase::call_push;
+    using _impl::_coro::PromiseBase::done;
+    using _impl::_coro::PromiseBase::init;
+    using _impl::_coro::PromiseBase::resume;
   };
 
   Coroutine() : _type_handler(nullptr) {}
@@ -155,7 +158,7 @@ class Coroutine : public _impl::_coro::CoroutineBase {
     }
   }
 
-  _impl::_coro::PromiseBase& _promise() override { return this->_type_handler.promise(); }
+  _impl::_coro::PromiseBase& promise() override { return this->_type_handler.promise(); }
 
  private:
   std::coroutine_handle<promise_type> _type_handler;
