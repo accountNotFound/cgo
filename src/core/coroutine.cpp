@@ -2,33 +2,45 @@
 
 namespace cgo::_impl::_coro {
 
-void init(CoroutineBase& fn) {
-  auto& stk = fn._promise()._stack = std::make_shared<std::stack<std::coroutine_handle<>>>();
-  stk->push(fn._handler());
-}
+void PromiseBase::init(PromiseBase* promise) { promise->_entry = promise->_current = promise; }
 
-bool done(CoroutineBase& fn) { return fn._handler().done(); }
-
-void resume(CoroutineBase& fn) {
-  auto& stk = *fn._promise()._stack;
-  std::coroutine_handle<> current;
+void PromiseBase::resume(PromiseBase* entry) {
+  PromiseBase* next = entry->_current;
+  PromiseBase* current = nullptr;
   do {
-    current = stk.top();
-    current.resume();
-    if (auto& ex = fn._promise()._exception; ex) {
-      stk.pop();
-      if (stk.empty()) {
+    current = next;
+    current->_handler.resume();
+    if (auto& ex = current->_exception; ex) {
+      next = PromiseBase::call_pop(current);
+      if (!next) {
         std::rethrow_exception(ex);
       }
-      using P = Coroutine<void>::promise_type;
-      std::coroutine_handle<P>::from_address(stk.top().address()).promise()._exception = ex;
+      next->_exception = ex;
+      entry->_current = next;
       continue;
     }
-    if (current.done()) {
-      stk.pop();
+    if (current->_handler.done()) {
+      next = PromiseBase::call_pop(current);
       continue;
     }
-  } while (!stk.empty() && stk.top() != current);
+    next = entry->_current;
+  } while (next && current != next);
+}
+
+void PromiseBase::call_push(PromiseBase* caller, PromiseBase* callee) {
+  caller->_callee = callee;
+  callee->_caller = caller;
+  callee->_entry = caller->_entry;
+  callee->_entry->_current = callee;
+}
+
+PromiseBase* PromiseBase::call_pop(PromiseBase* promise) {
+  if (promise->_caller) {
+    promise->_caller->_callee = nullptr;
+    promise->_entry = promise->_caller;
+    return promise->_caller;
+  }
+  return nullptr;
 }
 
 }  // namespace cgo::_impl::_coro
