@@ -37,17 +37,20 @@ void SignalBase::wait(const std::chrono::duration<double, std::milli>& duration)
 
 namespace _impl::_sched {
 
-TaskHandler TaskAllocator::create(int id, Coroutine<void> fn) {
-  _impl::_coro::init(fn);
+TaskHandler TaskAllocator::create(int id, Coroutine<void> fn, const std::string& name) {
+  Task* task;
   {
     std::unique_lock guard(this->_mtx);
-    this->_index[id] = this->_pool.emplace(this->_pool.end(), id, std::move(fn));
+    this->_index[id] = this->_pool.emplace(this->_pool.end(), id, std::move(fn), name);
+    task = &*this->_index[id];
+    task->create_at = std::chrono::steady_clock::now();
   }
-  return &*this->_index[id];
+  _impl::_coro::init(task->fn);
+  return task;
 }
 
 void TaskAllocator::destroy(TaskHandler task) {
-  int id = task.id();
+  int id = task->id;
   {
     std::unique_lock guard(this->_mtx);
     this->_pool.erase(this->_index.at(id));
@@ -87,13 +90,20 @@ Coroutine<void> TaskExecutor::suspend_running_task(TaskQueue& q_waiting, std::un
 
 void TaskExecutor::execute(TaskHandler task) {
   TaskExecutor::_t_running = task;
-  while (!TaskExecutor::_yield_flag && !TaskExecutor::_suspend_q_waiting && !task.done()) {
-    task.resume();
+
+  task->execute_cnt++;
+  while (!TaskExecutor::_yield_flag && !TaskExecutor::_suspend_q_waiting && !_impl::_coro::done(task->fn)) {
+    _impl::_coro::resume(task->fn);
   }
+
   if (TaskExecutor::_yield_flag) {
+    task->yield_cnt++;
+
     get_dispatcher().submit(task);
     TaskExecutor::_yield_flag = false;
   } else if (TaskExecutor::_suspend_q_waiting) {
+    task->suspend_cnt++;
+
     TaskExecutor::_suspend_q_waiting->push(task);
     TaskExecutor::_suspend_cond_lock->unlock();
     TaskExecutor::_suspend_q_waiting = nullptr;
@@ -101,6 +111,7 @@ void TaskExecutor::execute(TaskHandler task) {
   } else {
     get_dispatcher().destroy(task);
   }
+  TaskExecutor::_t_running = nullptr;
 }
 
 Coroutine<void> TaskCondition::wait(std::unique_lock<Spinlock>& lock) {
@@ -113,20 +124,20 @@ void TaskCondition::notify() {
   }
 }
 
-void TaskDispatcher::create(Coroutine<void> fn) {
+void TaskDispatcher::create(Coroutine<void> fn, const std::string& name) {
   int id = this->_tid.fetch_add(1);
   int slot = id % this->_t_allocs.size();
-  auto task = this->_t_allocs[slot].create(id, std::move(fn));
+  auto task = this->_t_allocs[slot].create(id, std::move(fn), name);
   this->_q_runnables[slot].push(task);
 }
 
 void TaskDispatcher::destroy(TaskHandler task) {
-  int slot = task.id() % this->_t_allocs.size();
+  int slot = task->id % this->_t_allocs.size();
   this->_t_allocs[slot].destroy(task);
 }
 
 void TaskDispatcher::submit(TaskHandler task) {
-  int slot = task.id() % this->_q_runnables.size();
+  int slot = task->id % this->_q_runnables.size();
   this->_q_runnables[slot].push(task);
 }
 

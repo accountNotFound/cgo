@@ -46,9 +46,15 @@ namespace _impl::_sched {
 struct Task {
   const int id;
   Coroutine<void> fn;
-  std::vector<std::any> locals;
+  const std::string name;
 
-  Task(int id, Coroutine<void> fn) : id(id), fn(std::move(fn)) {}
+  std::vector<std::any> locals = {};
+  std::chrono::steady_clock::time_point create_at = {};
+  int execute_cnt = 0;
+  int yield_cnt = 0;
+  int suspend_cnt = 0;
+
+  Task(int id, Coroutine<void> fn, const std::string& name) : id(id), fn(std::move(fn)), name(name) {}
 };
 
 class TaskHandler {
@@ -57,15 +63,11 @@ class TaskHandler {
 
   TaskHandler(Task* task) : _task(task) {}
 
+  Task& get() { return *this->_task; }
+
   operator bool() const { return this->_task; }
 
-  int id() const { return this->_task->id; }
-
-  std::vector<std::any>& locals() const { return this->_task->locals; }
-
-  bool done() const { return _impl::_coro::done(this->_task->fn); }
-
-  void resume() { _impl::_coro::resume(this->_task->fn); }
+  Task* operator->() const { return this->_task; }
 
  private:
   Task* _task = nullptr;
@@ -73,7 +75,7 @@ class TaskHandler {
 
 class TaskAllocator {
  public:
-  TaskHandler create(int id, Coroutine<void> fn);
+  TaskHandler create(int id, Coroutine<void> fn, const std::string& name = "");
 
   void destroy(TaskHandler task);
 
@@ -126,9 +128,9 @@ class TaskCondition {
 
 class TaskDispatcher {
  public:
-  TaskDispatcher(size_t n_partition) : _t_allocs(n_partition), _q_runnables(n_partition) {}
+  TaskDispatcher(size_t n_partition) : _tid(0), _t_allocs(n_partition), _q_runnables(n_partition) {}
 
-  void create(Coroutine<void> fn);
+  void create(Coroutine<void> fn, const std::string& name = "");
 
   void destroy(TaskHandler task);
 
@@ -200,12 +202,14 @@ class DeferGuard {
   return DeferGuard(std::forward<std::function<void()>>(fn));
 }
 
-inline void spawn(Coroutine<void> fn) { _impl::_sched::get_dispatcher().create(std::move(fn)); }
+inline void spawn(Coroutine<void> fn, const std::string& name = "") {
+  _impl::_sched::get_dispatcher().create(std::move(fn), name);
+}
 
 inline Coroutine<void> yield() { return _impl::_sched::TaskExecutor::yield_running_task(); }
 
-inline int this_coroutine_id() { return _impl::_sched::TaskExecutor::get_running_task().id(); }
+inline int this_coroutine_id() { return _impl::_sched::TaskExecutor::get_running_task()->id; }
 
-inline auto& this_coroutine_locals() { return _impl::_sched::TaskExecutor::get_running_task().locals(); }
+inline auto& this_coroutine_locals() { return _impl::_sched::TaskExecutor::get_running_task()->locals; }
 
 }  // namespace cgo
