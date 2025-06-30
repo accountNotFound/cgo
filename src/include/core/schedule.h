@@ -30,7 +30,7 @@ class SignalBase {
  public:
   virtual void emit();
 
-  virtual void wait(const std::chrono::duration<double, std::milli>& duration);
+  virtual void wait(std::chrono::duration<double, std::milli> duration);
 
  protected:
   Spinlock _mtx;

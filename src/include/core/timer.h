@@ -49,7 +49,7 @@ class DelayedDispatcher {
  public:
   DelayedDispatcher(size_t n_partition) : _tid(0), _pq_timers(n_partition) {}
 
-  void submit(std::function<void()>&& fn, const std::chrono::duration<double, std::milli>& timeout);
+  void submit(std::function<void()>&& fn, std::chrono::duration<double, std::milli> timeout);
 
   Delayed dispatch(size_t p_index);
 

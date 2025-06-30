@@ -21,7 +21,7 @@ void SignalBase::emit() {
   }
 }
 
-void SignalBase::wait(const std::chrono::duration<double, std::milli>& duration) {
+void SignalBase::wait(std::chrono::duration<double, std::milli> duration) {
   if (!this->_signal_flag) {
     std::unique_lock guard(this->_mtx);
     if (!this->_signal_flag) {

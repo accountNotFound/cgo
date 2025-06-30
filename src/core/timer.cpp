@@ -25,7 +25,7 @@ Delayed DelayedQueue::pop() {
   return Delayed(-1, nullptr, Delayed::TimePoint::max());
 }
 
-void DelayedDispatcher::submit(std::function<void()>&& fn, const std::chrono::duration<double, std::milli>& timeout) {
+void DelayedDispatcher::submit(std::function<void()>&& fn, std::chrono::duration<double, std::milli> timeout) {
   int id = this->_tid.fetch_add(1);
   int slot = id % this->_pq_timers.size();
   auto steady_timeout = std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout);
