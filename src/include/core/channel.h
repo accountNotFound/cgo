@@ -116,6 +116,13 @@ class Channel {
 namespace cgo {
 
 /**
+ * @brief Representation for void type
+ */
+struct Nil {};
+
+struct Dropout {};
+
+/**
  * @brief A copyable reference to real channel object
  */
 template <typename T>
@@ -144,13 +151,20 @@ class Channel {
     co_await sem.aquire();
   }
 
+  Coroutine<void> operator>>(Dropout) {
+    Semaphore sem(0);
+    T x;
+    this->_impl->submit_receiver(_impl::_chan::ChanEvent(&x, &sem));
+    co_await sem.aquire();
+  }
+
  private:
   std::shared_ptr<_impl::_chan::Channel<T>> _impl;
 };
 
 /**
  * @brief An one-shot select object
- * @note Touch select object after `Select::operator()` return is undefined behaviour
+ * @note Touch select object after `Select::operator()()` return is undefined behaviour
  */
 class Select {
  public:
@@ -160,7 +174,7 @@ class Select {
     Case(Select& select, _impl::_chan::Channel<T>& chan, int key, std::shared_ptr<_impl::_chan::SelectReducer>& reducer)
         : _select(&select), _chan(&chan), _key(key), _reducer(reducer) {}
 
-    void operator<<(const T& x) {
+    void operator<<(T& x) {
       this->_select->_invokers.emplace_back([x, chan = _chan, key = _key, reducer = _reducer]() {
         chan->submit_sender(_impl::_chan::ChanEvent(&x, key, reducer));
       });
@@ -176,6 +190,14 @@ class Select {
 
     void operator>>(T& x) {
       this->_select->_invokers.emplace_back([&x, chan = _chan, key = _key, reducer = _reducer]() {
+        chan->submit_receiver(_impl::_chan::ChanEvent(&x, key, reducer));
+      });
+      this->_select = nullptr;
+    }
+
+    void operator>>(Dropout) {
+      this->_select->_invokers.emplace_back([chan = _chan, key = _key, reducer = _reducer]() {
+        T x;
         chan->submit_receiver(_impl::_chan::ChanEvent(&x, key, reducer));
       });
       this->_select = nullptr;
@@ -201,14 +223,43 @@ class Select {
     return Case<T>(*this, *chan._impl, key, this->_reducer);
   }
 
-  /**
-   * @return Unique key set in `Select::on()`, or -1 if `with_default=true` and no channel event comes to activate
-   */
-  Coroutine<int> operator()(bool with_default);
+  template <typename T>
+  Case<T> on(int key, Channel<T>&& chan) {
+    this->_storages.push_back(chan._impl);
+    return Case<T>(*this, *chan._impl, key, this->_reducer);
+  }
+
+  void on_default(int key);
+
+  Coroutine<int> operator()();
 
  private:
   std::shared_ptr<_impl::_chan::SelectReducer> _reducer;
   std::vector<std::function<void()>> _invokers;
+  std::vector<std::shared_ptr<void>> _storages;
+  bool _enable_default = false;
 };
+
+/**
+ * @brief Collect return value of `fn` and send to returned channel
+ * @note Returned channel will contain `cgo::Nil{}` if `T=void`
+ */
+template <typename T, typename V = std::conditional_t<std::is_void_v<T>, Nil, T>>
+Channel<V> collect(Coroutine<T> fn) {
+  Channel<V> chan(0);
+  cgo::spawn([](Coroutine<T> fn, Channel<V> chan) -> cgo::Coroutine<void> {
+    cgo::this_coroutine_locals().resize(1);
+    cgo::this_coroutine_locals()[0] = chan;
+
+    if constexpr (std::is_void_v<T>) {
+      co_await fn;
+      co_await (chan << Nil{});
+    } else {
+      V res = co_await fn;
+      co_await (chan << std::move(res));
+    }
+  }(std::move(fn), chan));
+  return chan;
+}
 
 }  // namespace cgo

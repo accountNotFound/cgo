@@ -26,7 +26,7 @@ Delayed DelayedQueue::pop() {
 }
 
 void DelayedDispatcher::submit(std::function<void()>&& fn, const std::chrono::duration<double, std::milli>& timeout) {
-  int id = this->_gid.fetch_add(1);
+  int id = this->_tid.fetch_add(1);
   int slot = id % this->_pq_timers.size();
   auto steady_timeout = std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout);
   auto ex_tp = std::chrono::steady_clock::now() + steady_timeout;
@@ -35,7 +35,8 @@ void DelayedDispatcher::submit(std::function<void()>&& fn, const std::chrono::du
 
 Delayed DelayedDispatcher::dispatch(size_t p_index) {
   for (int i = 0; i < this->_pq_timers.size(); ++i) {
-    if (auto timer = this->_pq_timers[i].pop(); timer) {
+    int slot = (p_index + i) % this->_pq_timers.size();
+    if (auto timer = this->_pq_timers[slot].pop(); timer) {
       return timer;
     }
   }
@@ -46,7 +47,7 @@ Delayed DelayedDispatcher::dispatch(size_t p_index) {
 
 namespace cgo {
 
-Coroutine<void> sleep(const std::chrono::duration<double, std::milli>& timeout) {
+Coroutine<void> sleep(std::chrono::duration<double, std::milli> timeout) {
   Semaphore sem(0);
   _impl::_time::get_dispatcher().submit([&sem]() { sem.release(); }, timeout);
   co_await sem.aquire();

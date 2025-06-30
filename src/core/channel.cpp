@@ -69,6 +69,12 @@ ChanEvent::MoveStatus ChanEvent::to(ChanEvent& dst, MoveFn move_fn) {
       dst._chan_sem->release();
     }
     return res;
+  } else if (!this->_select_reduce && dst._select_reduce) {
+    auto res = dst.from(this->_data, move_fn);
+    if (res == MoveStatus::Ok) {
+      this->_chan_sem->release();
+    }
+    return res;
   } else {
     auto res = dst.from(this->_data, move_fn);
     if (res == MoveStatus::Ok) {
@@ -124,7 +130,12 @@ bool ChanEventMatcher::from(ChanEvent& src, MoveFn move_fn) { return matcher_fro
 
 namespace cgo {
 
-Coroutine<int> Select::operator()(bool with_default) {
+void Select::on_default(int key) {
+  this->_enable_default = true;
+  this->_reducer->key = key;
+}
+
+Coroutine<int> Select::operator()() {
   std::minstd_rand rng;
   std::shuffle(this->_invokers.begin(), this->_invokers.end(), rng);
   for (auto& fn : this->_invokers) {
@@ -133,7 +144,7 @@ Coroutine<int> Select::operator()(bool with_default) {
       break;
     }
   }
-  if (!with_default) {
+  if (!this->_enable_default) {
     co_await this->_reducer->sem.aquire();
   }
   std::unique_lock guard(this->_reducer->mtx);

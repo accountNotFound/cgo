@@ -47,7 +47,7 @@ class DelayedQueue {
 
 class DelayedDispatcher {
  public:
-  DelayedDispatcher(size_t n_partition) : _gid(0), _pq_timers(n_partition) {}
+  DelayedDispatcher(size_t n_partition) : _tid(0), _pq_timers(n_partition) {}
 
   void submit(std::function<void()>&& fn, const std::chrono::duration<double, std::milli>& timeout);
 
@@ -56,7 +56,7 @@ class DelayedDispatcher {
   void regist(size_t p_index, _impl::SignalBase& signal) { this->_pq_timers[p_index].regist(signal); }
 
  private:
-  std::atomic<int> _gid;
+  std::atomic<int> _tid;
   std::vector<DelayedQueue> _pq_timers;
 };
 
@@ -68,6 +68,6 @@ inline DelayedDispatcher& get_dispatcher() { return *g_dispatcher; }
 
 namespace cgo {
 
-Coroutine<void> sleep(const std::chrono::duration<double, std::milli>& timeout);
+Coroutine<void> sleep(std::chrono::duration<double, std::milli> timeout);
 
 }  // namespace cgo

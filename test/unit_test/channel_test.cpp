@@ -98,7 +98,7 @@ void select_read_test(int n_reader, int buffer_size) {
         select.on(0, chans[0]) >> v;
         select.on(1, chans[1]) >> v;
         select.on(2, chans[2]) >> v;
-        co_await select(/*with_default=*/false);
+        co_await select();
         ASSERT(values[v] == -1, "select %d which already read\n", v);
         values[v] = v;
       }
@@ -160,7 +160,7 @@ void select_test(int n_writer, int n_reader, int buffer_size) {
         select.on(0, chans[0]) >> vals[0];
         select.on(1, chans[1]) >> vals[1];
         select.on(2, chans[2]) >> vals[2];
-        int key = co_await select(/*with_default=*/false);
+        int key = co_await select();
         // printf("[%d] recv{%d} from key=%d, val=%d\n", cgo::this_coroutine_id(), i, key, vals[key]);
         ASSERT(vals[key] == key, "key=%d, val=%d\n", key, vals[key]);
         add(key);
@@ -176,7 +176,7 @@ void select_test(int n_writer, int n_reader, int buffer_size) {
         select.on(0, chans[0]) << 0;
         select.on(1, chans[1]) << 1;
         select.on(2, chans[2]) << 2;
-        int key = co_await select(/*with_default=*/false);
+        int key = co_await select();
         // printf("[%d] send{%d} to key=%d, val=%d\n", cgo::this_coroutine_id(), i, key, key);
       }
       w_res.fetch_add(1);
