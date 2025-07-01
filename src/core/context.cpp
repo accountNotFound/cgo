@@ -23,7 +23,7 @@ void Context::stop() {
 }
 
 void Context::run_worker(size_t index) {
-  _impl::_event::EventSignal signal(index, /*batch_size=*/64);
+  _impl::EventSignal signal;
   auto guard = defer([&signal]() { signal.close(); });
 
   _impl::_sched::get_dispatcher().regist(index, signal);
@@ -49,11 +49,12 @@ void Context::run_worker(size_t index) {
     if (sched_flag || timer_flag) {
       auto now = std::chrono::steady_clock::now();
       if (now - handle_time > std::chrono::milliseconds(1)) {
-        signal.wait_event_proc(std::chrono::milliseconds(0));
+        signal.proxy_event_handle(index, 64, std::chrono::milliseconds(0));
         handle_time = now;
       }
     } else {
-      signal.wait_event_proc(std::min(std::chrono::milliseconds(50), wait_timeout));
+      // signal.proxy_event_handle(index, 64, std::min(wait_timeout, std::chrono::milliseconds(50)));
+      _impl::_event::get_dispatcher().handle(index, 64, std::min(wait_timeout, std::chrono::milliseconds(50)));
     }
   }
 }

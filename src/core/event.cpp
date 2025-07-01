@@ -29,68 +29,45 @@ size_t Event::to_linux(Event cgo_event) {
   return linux_event;
 }
 
-EventSignal::EventSignal(size_t p_index, size_t ev_batch_size) : _p_index(p_index), _ev_batch(ev_batch_size) {
-  this->_fd = ::eventfd(0, ::EFD_NONBLOCK | ::EFD_CLOEXEC);
-  get_dispatcher().add(this->_fd, Event::IN | Event::ONESHOT, [fd = this->_fd](Event ev) {
-    int u;
-    ::read(fd, &u, sizeof(u));
-  });
-}
-
-void EventSignal::close() { ::close(this->_fd); }
-
-void EventSignal::emit() {
-  if (this->_wait_flag && !this->_signal_flag) {
-    std::unique_lock guard(this->_mtx);
-    if (this->_wait_flag && !this->_signal_flag) {
-      get_dispatcher().mod(this->_fd, Event::IN | Event::ONESHOT);
-      int u = 1;
-      ::write(this->_fd, &u, sizeof(u));
-      this->_signal_flag = true;
-    }
-  }
-}
-
-void EventSignal::wait(const std::chrono::duration<double, std::milli>& duration) {
-  if (!this->_signal_flag) {
-    std::unique_lock guard(this->_mtx);
-    if (!this->_signal_flag) {
-      this->_signal_flag = false;
-      this->_wait_flag = true;
-      guard.unlock();
-      get_dispatcher().handle(this->_p_index, this->_ev_batch, duration);
-      guard.lock();
-      this->_wait_flag = false;
-    }
-  }
-}
-
 EventHandler::EventHandler() { this->_fd = ::epoll_create(1024); }
 
 EventHandler::~EventHandler() { ::close(this->_fd); }
 
-void EventHandler::add(Fd fd, Event on, std::function<void(Event)>&& callback) {
+void EventHandler::add(int fd, Event on, std::function<void(Event)>&& fn) {
   std::unique_lock guard(this->_mtx);
   ::epoll_event ev;
   ev.events = Event::to_linux(on) | ::EPOLLET;
-  ev.data.fd = fd;
-  if (::epoll_ctl(this->_fd, EPOLL_CTL_ADD, fd, &ev) == 0) {
-    this->_fd_calls[fd] = std::forward<decltype(callback)>(callback);
+  int cid = ev.data.u64 = this->_tid.fetch_add(1);
+
+  this->_m_calls[cid] = {fd, on, std::forward<decltype(fn)>(fn)};
+  this->_fd_cids[fd] = cid;
+
+  if (::epoll_ctl(this->_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
+    throw std::runtime_error("epoll_ctl add failed");
   }
 }
 
-void EventHandler::mod(Fd fd, Event on) {
+void EventHandler::mod(int fd, Event on, std::function<void(Event)>&& fn) {
   std::unique_lock guard(this->_mtx);
   ::epoll_event ev;
   ev.events = Event::to_linux(on) | ::EPOLLET;
-  ev.data.fd = fd;
-  ::epoll_ctl(this->_fd, EPOLL_CTL_MOD, fd, &ev);
+  int cid = ev.data.u64 = this->_tid.fetch_add(1);
+
+  this->_m_calls[cid] = {fd, on, std::forward<decltype(fn)>(fn)};
+  this->_m_calls.erase(this->_fd_cids[fd]);
+  this->_fd_cids[fd] = cid;
+
+  if (::epoll_ctl(this->_fd, EPOLL_CTL_MOD, fd, &ev) != 0) {
+    throw std::runtime_error("epoll_ctl mod failed");
+  }
 }
 
-void EventHandler::del(Fd fd) {
+void EventHandler::del(int fd) {
   std::unique_lock guard(this->_mtx);
   ::epoll_ctl(this->_fd, EPOLL_CTL_DEL, fd, nullptr);
-  this->_fd_calls.erase(fd);
+
+  this->_m_calls.erase(this->_fd_cids[fd]);
+  this->_fd_cids.erase(fd);
 }
 
 size_t EventHandler::handle(size_t handle_batch, size_t timeout_ms) {
@@ -99,12 +76,15 @@ size_t EventHandler::handle(size_t handle_batch, size_t timeout_ms) {
   if (active_num <= 0) {
     return 0;
   }
-  for (int i = 0; i < active_num; i++) {
-    Fd fd = ev_buffer[i].data.fd;
+  for (int i = 0; i < active_num; ++i) {
+    int cid = ev_buffer[i].data.u64;
     Event ev = Event::from_linux(ev_buffer[i].events);
     std::unique_lock guard(this->_mtx);
-    if (this->_fd_calls.contains(fd)) {
-      this->_fd_calls[fd](ev);
+    if (this->_m_calls.contains(cid)) {
+      auto& callback = this->_m_calls[cid];
+      if (callback.on & ev) {
+        callback.fn(ev);
+      }
     }
   }
   return active_num;
@@ -113,3 +93,69 @@ size_t EventHandler::handle(size_t handle_batch, size_t timeout_ms) {
 #endif
 
 }  // namespace cgo::_impl::_event
+
+namespace cgo::_impl {
+
+EventSignal::EventSignal() {
+  this->_fd = ::eventfd(0, ::EFD_NONBLOCK | ::EFD_CLOEXEC);
+  _event::get_dispatcher().add(this->_fd, _event::Event::IN | _event::Event::ONESHOT,
+                               [this](_event::Event ev) { this->_callback(ev); });
+}
+
+void EventSignal::close() {
+  _event::get_dispatcher().del(this->_fd);
+  ::close(this->_fd);
+}
+
+void EventSignal::emit() {
+  if (this->_wait_flag && !this->_signal_flag) {
+    std::unique_lock guard(this->_mtx);
+    if (this->_wait_flag && !this->_signal_flag) {
+      int u = 1;
+      ::write(this->_fd, &u, sizeof(u));
+      this->_signal_flag = true;
+    }
+  }
+}
+
+void EventSignal::wait(std::chrono::duration<double, std::milli> duration) {
+  if (!this->_signal_flag) {
+    std::unique_lock guard(this->_mtx);
+    if (!this->_signal_flag) {
+      this->_signal_flag = false;
+      this->_wait_flag = true;
+      this->_cond.wait_for(guard, duration);
+      _event::get_dispatcher().mod(this->_fd, _event::Event::IN | _event::Event::ONESHOT,
+                                   [this](_event::Event ev) { this->_callback(ev); });
+      this->_wait_flag = false;
+    }
+  }
+}
+
+void EventSignal::proxy_event_handle(size_t p_index, size_t batch_size,
+                                     std::chrono::duration<double, std::milli> duration) {
+  if (!this->_signal_flag) {
+    std::unique_lock guard(this->_mtx);
+    if (!this->_signal_flag) {
+      this->_signal_flag = false;
+      this->_wait_flag = true;
+      guard.unlock();
+      _event::get_dispatcher().handle(p_index, batch_size, duration);
+      guard.lock();
+      _event::get_dispatcher().mod(this->_fd, _event::Event::IN | _event::Event::ONESHOT, [this](_event::Event ev) {
+        int u;
+        ::read(this->_fd, &u, sizeof(u));
+      });
+      this->_wait_flag = false;
+    }
+  }
+}
+
+void EventSignal::_callback(_event::Event ev) {
+  int u;
+  ::read(this->_fd, &u, sizeof(u));
+  std::unique_lock guard(this->_mtx);
+  this->_cond.notify_one();
+}
+
+}  // namespace cgo::_impl
