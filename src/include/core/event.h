@@ -106,10 +106,9 @@ class EventSignal : public SignalBase {
 
   void wait(std::chrono::duration<double, std::milli> timeout) override;
 
-  void proxy_event_handle(size_t p_index, size_t batch_size, std::chrono::duration<double, std::milli> timeout);
-
  private:
   int _fd;
+  int _event_flag = 0;
 
   void _callback(_event::Event ev);
 };

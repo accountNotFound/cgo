@@ -49,12 +49,11 @@ void Context::run_worker(size_t index) {
     if (sched_flag || timer_flag) {
       auto now = std::chrono::steady_clock::now();
       if (now - handle_time > std::chrono::milliseconds(1)) {
-        signal.proxy_event_handle(index, 64, std::chrono::milliseconds(0));
+        _impl::_event::get_dispatcher().handle(index, 128, std::chrono::milliseconds(0));
         handle_time = now;
       }
     } else {
-      // signal.proxy_event_handle(index, 64, std::min(wait_timeout, std::chrono::milliseconds(50)));
-      _impl::_event::get_dispatcher().handle(index, 64, std::min(wait_timeout, std::chrono::milliseconds(50)));
+      _impl::_event::get_dispatcher().handle(index, 128, std::min(wait_timeout, std::chrono::milliseconds(50)));
     }
   }
 }

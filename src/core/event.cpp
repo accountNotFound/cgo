@@ -108,11 +108,10 @@ void EventSignal::close() {
 }
 
 void EventSignal::emit() {
-  if (this->_wait_flag && !this->_signal_flag) {
+  if (this->_wait_flag && !this->_signal_flag && !this->_event_flag) {
     std::unique_lock guard(this->_mtx);
-    if (this->_wait_flag && !this->_signal_flag) {
-      int u = 1;
-      ::write(this->_fd, &u, sizeof(u));
+    if (this->_wait_flag && !this->_signal_flag && !this->_event_flag) {
+      ::write(this->_fd, &this->_event_flag, sizeof(this->_event_flag));
       this->_signal_flag = true;
     }
   }
@@ -132,29 +131,9 @@ void EventSignal::wait(std::chrono::duration<double, std::milli> duration) {
   }
 }
 
-void EventSignal::proxy_event_handle(size_t p_index, size_t batch_size,
-                                     std::chrono::duration<double, std::milli> duration) {
-  if (!this->_signal_flag) {
-    std::unique_lock guard(this->_mtx);
-    if (!this->_signal_flag) {
-      this->_signal_flag = false;
-      this->_wait_flag = true;
-      guard.unlock();
-      _event::get_dispatcher().handle(p_index, batch_size, duration);
-      guard.lock();
-      _event::get_dispatcher().mod(this->_fd, _event::Event::IN | _event::Event::ONESHOT, [this](_event::Event ev) {
-        int u;
-        ::read(this->_fd, &u, sizeof(u));
-      });
-      this->_wait_flag = false;
-    }
-  }
-}
-
 void EventSignal::_callback(_event::Event ev) {
-  int u;
-  ::read(this->_fd, &u, sizeof(u));
   std::unique_lock guard(this->_mtx);
+  ::read(this->_fd, &this->_event_flag, sizeof(this->_event_flag));
   this->_cond.notify_one();
 }
 

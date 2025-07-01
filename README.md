@@ -27,7 +27,7 @@ cgo::Coroutine<void> bar() {
 
   // do not use lambda capture. See notes in cppreference
   cgo::spawn([](int timeout_ms) -> cgo::Coroutine<void> {
-    co_await cgo::sleep(timeout_ms);
+    co_await cgo::sleep(std::chrono::milliseconds(timeout_ms));
   }(timeout_ms));
 }
 
@@ -41,26 +41,36 @@ cgo::Coroutine<void> select() {
   cgo::Channel<int> ichan;
   cgo::Channel<std::string> schan;
 
-  cgo::spawn([](cgo::Channel<int> ichan, cgo::Channel<std::string> chan) -> cgo::Coroutine<void> {
-    cgo::sleep(1000);
-    co_await schan.send("123");
-    int v = co_await ichan.recv(); // block here forever
-  }(ichan, schan));
+  cgo::spawn([](cgo::Channel<std::string> chan) -> cgo::Coroutine<void> {
+    cgo::sleep(std::chrono::milliseconds(1000));
+    co_await (chan << "123");
+  }(schan));
 
   {
-    // suggest to destroy selector immediately when case-switch done
-    // the Selector::on() only support int type as key, but you can write following code by User-Defined-Literal
-    cgo::Selector s;
-    s.on("empty_ichan"_u, ichan)
-     .on("schan_after_1_sec"_u, schan);
-    switch ((co_await s.recv())) {
-      case "empty_ichan"_u: {
-        // never be here
-        break;
+    cgo::Select sel;
+    sel.on(1, ichan) << 100;
+
+    std::string str;
+    sel.on(2, schan) >> str;
+
+    sel.on(3, cgo::collect(cgo::sleep(std::chrono::milliseconds(5000)))) >> cgo::Dropout{}; // discard the value
+
+    sel.on_default(-1); // enable a default case
+
+    switch(co_await sel()) {
+      case 1: {
+        // never be here. Because ichan has no buffer and no reciever (`sel` is a sender in this case)
       }
-      case "schan_after_1_sec"_u: {
-        auto str = s.cast<std::string>(); // selector recv value with any type, cast it
-        break;
+      case 2: {
+        // go here after 1 sec if `Select::on_default()` is not called
+        // or it maybe ignored with `sel.on_default()`
+      }
+      case 3: {
+        // nerver be here. Because this case is activated later (5 sec) than case 2 (1 sec)
+      }
+      default: {
+        // a.k.a the case -1: Because -1 is passed to `Select::on_default()`
+        // go here immediately if `Select::on_default()` is called and no other case becomes activated
       }
     }
   }
@@ -74,17 +84,19 @@ cgo::Coroutine<void> server() {
 
   server.bind(8080);
   server.listen(1000);  
-  cgo::Socket conn = co_await server.accept();
-  cgo::Defer defer([&conn]() { conn.close(); });
 
-  int64_t recv_timeout_ms = 10*1000;
-  try {
-    std::string req = co_await cgo::timeout(conn.recv(256), recv_timeout_ms);
-  } catch (const cgo::TimeoutException& e) {
-    printf("recv timeout\n");
-    co_return;
-  }
-  co_await conn.send("service end");
+  cgo::Socket conn = co_await server.accept();
+
+  cgo::spawn([](cgo::Socket conn)->cgo::Coroutine<void> {
+    cgo::Defer defer([&conn]() { conn.close(); });
+
+    auto req = co_await conn.recv(256, /*timeout=*/std::chrono::milliseconds(5000));
+    if(!req.has_value()) {
+      // error process
+    }
+    co_await conn.send("echo from server: " + req.value());
+  }(conn));
+
 }
 ```
-You can see more detail about this in `test/socket_test.cpp`
+You can see more detail about this in `test/unit_test/socket_test.cpp`

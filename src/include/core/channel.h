@@ -163,7 +163,12 @@ class Channel {
 };
 
 /**
- * @brief An one-shot select object
+ * @brief An one-shot select object. Bind some channels with unique key by called `Select::on()`,
+ *
+ *        then `co_await Select::operator()()` to wait and get a key, which represents corresponding 
+ * 
+ *        channel envet happened
+ *
  * @note Touch select object after `Select::operator()()` return is undefined behaviour
  */
 class Select {
