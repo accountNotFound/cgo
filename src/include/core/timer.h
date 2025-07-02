@@ -3,6 +3,7 @@
 #include <atomic>
 #include <vector>
 
+#include "core/channel.h"
 #include "core/schedule.h"
 
 namespace cgo::_impl::_time {
@@ -67,6 +68,8 @@ inline DelayedDispatcher& get_dispatcher() { return *g_dispatcher; }
 }  // namespace cgo::_impl::_time
 
 namespace cgo {
+
+Channel<Nil> timeout(std::chrono::duration<double, std::milli> timeout);
 
 Coroutine<void> sleep(std::chrono::duration<double, std::milli> timeout);
 

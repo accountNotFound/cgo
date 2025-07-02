@@ -47,6 +47,12 @@ Delayed DelayedDispatcher::dispatch(size_t p_index) {
 
 namespace cgo {
 
+Channel<Nil> timeout(std::chrono::duration<double, std::milli> timeout) {
+  Channel<Nil> chan(1);
+  _impl::_time::get_dispatcher().submit([chan]() mutable { chan.nowait() << Nil{}; }, timeout);
+  return chan;
+}
+
 Coroutine<void> sleep(std::chrono::duration<double, std::milli> timeout) {
   Semaphore sem(0);
   _impl::_time::get_dispatcher().submit([&sem]() { sem.release(); }, timeout);

@@ -75,6 +75,9 @@ class ValuePromiseBase<T&> : public PromiseBase {
   T* _value = nullptr;
 };
 
+template <typename T>
+class ValuePromiseBase<T&&> : public ValuePromiseBase<std::remove_reference_t<T>> {};
+
 class CoroutineBase {
  public:
   virtual ~CoroutineBase() = default;
@@ -98,6 +101,8 @@ namespace cgo {
 template <typename T>
 class Coroutine : public _impl::_coro::CoroutineBase {
  public:
+  using RetType = T;
+
   struct promise_type
       : public std::conditional_t<std::is_void_v<T>, _impl::_coro::VoidPromiseBase, _impl::_coro::ValuePromiseBase<T>> {
     friend class Coroutine;
@@ -140,7 +145,7 @@ class Coroutine : public _impl::_coro::CoroutineBase {
       std::rethrow_exception(ex);
     }
     if constexpr (!std::is_void_v<T>) {
-      if constexpr (std::is_reference_v<T>) {
+      if constexpr (std::is_lvalue_reference_v<T>) {
         return std::ref(*this->_type_handler.promise()._value);
       } else {
         return std::move(this->_type_handler.promise()._value);

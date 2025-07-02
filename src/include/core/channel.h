@@ -46,9 +46,9 @@ class ChanEvent {
 
 class ChanEventMatcher {
  public:
-  void submit_sender(const ChanEvent& ev) { this->_senders.push(ev); }
+  void submit_sender(ChanEvent ev) { this->_senders.push(std::move(ev)); }
 
-  void submit_receiver(const ChanEvent& ev) { this->_receivers.push(ev); }
+  void submit_receiver(ChanEvent ev) { this->_receivers.push(std::move(ev)); }
 
   bool to(void* dst, MoveFn move_fn);
 
@@ -64,44 +64,48 @@ class ChanEventMatcher {
 
 template <typename T>
 class Channel {
-  friend class Select;
-
  public:
   static void move(void* src, void* dst) { *static_cast<T*>(dst) = std::move(*static_cast<T*>(src)); }
 
   Channel(size_t capacity) : _capacity(capacity) {}
 
-  void submit_sender(ChanEvent src) {
+  bool recv_from(ChanEvent src, bool enable_async = true) {
     std::unique_lock guard(this->_mtx);
     if (this->_buffer.empty()) {
       if (this->_matcher.from(src, Channel::move)) {
-        return;
+        return true;
       }
     }
     // buffer not empty, so no waiting receiver
     if (this->_buffer.size() < this->_capacity) {
       if (T x; src.to(&x, Channel::move) == ChanEvent::MoveStatus::Ok) {
         this->_buffer.push(std::move(x));
-        return;
+        return true;
       }
     }
-    this->_matcher.submit_sender(src);
+    if (enable_async) {
+      this->_matcher.submit_sender(src);
+    }
+    return false;
   }
 
-  void submit_receiver(ChanEvent dst) {
+  bool send_to(ChanEvent dst, bool enable_async = true) {
     std::unique_lock guard(this->_mtx);
     if (this->_buffer.empty()) {
       if (this->_matcher.to(dst, Channel::move)) {
-        return;
+        return true;
       }
     } else if (dst.from(&this->_buffer.front(), Channel::move) == ChanEvent::MoveStatus::Ok) {
       this->_buffer.pop();
       if (T x; this->_matcher.to(&x, Channel::move)) {
         this->_buffer.push(std::move(x));
       }
-      return;
+      return true;
     }
-    this->_matcher.submit_receiver(dst);
+    if (enable_async) {
+      this->_matcher.submit_receiver(dst);
+    }
+    return false;
   }
 
  private:
@@ -129,34 +133,55 @@ template <typename T>
 class Channel {
   friend class Select;
 
+ private:
+  class Nowait {
+   public:
+    Nowait(_impl::_chan::Channel<T>& chan) : _chan(&chan) {}
+
+    bool operator<<(T& x) {
+      Semaphore sem(0);
+      return this->_chan->recv_from(_impl::_chan::ChanEvent(&x, &sem), /*enable_async=*/false);
+    }
+
+    bool operator<<(T&& x) {
+      Semaphore sem(0);
+      return this->_chan->recv_from(_impl::_chan::ChanEvent(&x, &sem), /*enable_async=*/false);
+    }
+
+   private:
+    _impl::_chan::Channel<T>* _chan;
+  };
+
  public:
   Channel(size_t capacity = 0) : _impl(std::make_shared<_impl::_chan::Channel<T>>(capacity)) {}
 
-  Coroutine<void> operator<<(const T& x) {
+  Coroutine<void> operator<<(T& x) {
     T x_copy = x;
     Semaphore sem(0);
-    this->_impl->submit_sender(_impl::_chan::ChanEvent(&x_copy, &sem));
+    this->_impl->recv_from(_impl::_chan::ChanEvent(&x_copy, &sem));
     co_await sem.aquire();
   }
 
   Coroutine<void> operator<<(T&& x) {
     Semaphore sem(0);
-    this->_impl->submit_sender(_impl::_chan::ChanEvent(&x, &sem));
+    this->_impl->recv_from(_impl::_chan::ChanEvent(&x, &sem));
     co_await sem.aquire();
   }
 
   Coroutine<void> operator>>(T& x) {
     Semaphore sem(0);
-    this->_impl->submit_receiver(_impl::_chan::ChanEvent(&x, &sem));
+    this->_impl->send_to(_impl::_chan::ChanEvent(&x, &sem));
     co_await sem.aquire();
   }
 
   Coroutine<void> operator>>(Dropout) {
     Semaphore sem(0);
     T x;
-    this->_impl->submit_receiver(_impl::_chan::ChanEvent(&x, &sem));
+    this->_impl->send_to(_impl::_chan::ChanEvent(&x, &sem));
     co_await sem.aquire();
   }
+
+  Nowait nowait() { return Nowait(*_impl); }
 
  private:
   std::shared_ptr<_impl::_chan::Channel<T>> _impl;
@@ -165,14 +190,14 @@ class Channel {
 /**
  * @brief An one-shot select object. Bind some channels with unique key by called `Select::on()`,
  *
- *        then `co_await Select::operator()()` to wait and get a key, which represents corresponding 
- * 
+ *        then `co_await Select::operator()()` to wait and get a key, which represents corresponding
+ *
  *        channel envet happened
  *
  * @note Touch select object after `Select::operator()()` return is undefined behaviour
  */
 class Select {
- public:
+ private:
   template <typename T>
   class Case {
    public:
@@ -181,21 +206,21 @@ class Select {
 
     void operator<<(T& x) {
       this->_select->_invokers.emplace_back([x, chan = _chan, key = _key, reducer = _reducer]() {
-        chan->submit_sender(_impl::_chan::ChanEvent(&x, key, reducer));
+        chan->recv_from(_impl::_chan::ChanEvent(&x, key, reducer));
       });
       this->_select = nullptr;
     }
 
     void operator<<(T&& x) {
       this->_select->_invokers.emplace_back([x = std::move(x), chan = _chan, key = _key, reducer = _reducer]() {
-        chan->submit_sender(_impl::_chan::ChanEvent(const_cast<T*>(&x), key, reducer));
+        chan->recv_from(_impl::_chan::ChanEvent(const_cast<T*>(&x), key, reducer));
       });
       this->_select = nullptr;
     }
 
     void operator>>(T& x) {
       this->_select->_invokers.emplace_back([&x, chan = _chan, key = _key, reducer = _reducer]() {
-        chan->submit_receiver(_impl::_chan::ChanEvent(&x, key, reducer));
+        chan->send_to(_impl::_chan::ChanEvent(&x, key, reducer));
       });
       this->_select = nullptr;
     }
@@ -203,7 +228,7 @@ class Select {
     void operator>>(Dropout) {
       this->_select->_invokers.emplace_back([chan = _chan, key = _key, reducer = _reducer]() {
         T x;
-        chan->submit_receiver(_impl::_chan::ChanEvent(&x, key, reducer));
+        chan->send_to(_impl::_chan::ChanEvent(&x, key, reducer));
       });
       this->_select = nullptr;
     }
@@ -216,6 +241,7 @@ class Select {
     ;
   };
 
+ public:
   Select() : _reducer(std::make_shared<_impl::_chan::SelectReducer>()) {}
 
   Select(const Select&) = delete;
@@ -246,7 +272,7 @@ class Select {
 };
 
 /**
- * @brief Collect return value of `fn` and send to returned channel
+ * @brief Spawn `fn` and collect returned value, send it into returned channel
  * @note Returned channel will contain `cgo::Nil{}` if `T=void`
  */
 template <typename T, typename V = std::conditional_t<std::is_void_v<T>, Nil, T>>

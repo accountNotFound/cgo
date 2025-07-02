@@ -14,11 +14,22 @@ std::atomic<size_t> end_num = 0;
 cgo::Coroutine<void> foo(int fid, std::chrono::milliseconds wait_ms) {
   auto begin = std::chrono::steady_clock::now();
   for (int i = 0; i < foo_loop; ++i) {
-    // co_await cgo::sleep(wait_ms);
-
-    cgo::Select select;
-    select.on(1, cgo::collect(cgo::sleep(wait_ms))) >> cgo::Dropout{};
-    co_await select();
+    int r = std::rand() % 3;
+    switch (r) {
+      case 0: {
+        co_await cgo::sleep(wait_ms);
+        break;
+      }
+      case 1: {
+        co_await (cgo::timeout(wait_ms) >> cgo::Dropout{});
+        break;
+      }
+      case 2: {
+        cgo::Select select;
+        select.on(1, cgo::collect(cgo::sleep(wait_ms))) >> cgo::Dropout{};
+        co_await select();
+      }
+    }
   }
 
   auto end = std::chrono::steady_clock::now();
