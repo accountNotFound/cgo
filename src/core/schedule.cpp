@@ -37,6 +37,12 @@ void SignalBase::wait(std::chrono::duration<double, std::milli> duration) {
 
 namespace _impl::_sched {
 
+void TaskAllocator::clear() {
+  for (auto& task : this->_pool) {
+    static_cast<_impl::CoroutineBase&>(task.fn).destroy();
+  }
+}
+
 TaskHandler TaskAllocator::create(int id, Coroutine<void> fn, const std::string& name) {
   Task* task;
   {
@@ -122,6 +128,12 @@ Coroutine<void> TaskCondition::wait(std::unique_lock<Spinlock>& lock) {
 void TaskCondition::notify() {
   if (auto next = this->_q_waiting.pop(); next) {
     get_dispatcher().submit(next);
+  }
+}
+
+void TaskDispatcher::clear() {
+  for (auto& alloc : this->_t_allocs) {
+    alloc.clear();
   }
 }
 

@@ -13,10 +13,11 @@ void PromiseBase::call_stack_create(PromiseBase* promise) { promise->_entry = pr
 void PromiseBase::call_stack_destroy(PromiseBase* promise) {
   auto current = promise->_entry->_current;
   while (current) {
-    current->_callee = nullptr;
-    current->coro->handler.destroy();
+    auto handler = current->coro->handler;
+    auto next = current->_caller;
     current->coro->handler = nullptr;
-    current = current->_caller;
+    handler.destroy();
+    current = next;
   }
 }
 
@@ -66,7 +67,7 @@ auto PromiseBase::_call_stack_pop(PromiseBase* promise) -> PromiseBase* {
 }  // namespace _coro
 
 CoroutineBase::CoroutineBase(CoroutineBase&& rhs) {
-  if (this->_promise->coro) {
+  if (this->_promise && this->_promise->coro) {
     std::cerr << "coroutine can't be moved anymore after `init()` or `co_await`\n";
     std::exit(EXIT_FAILURE);
   }

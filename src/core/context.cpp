@@ -76,6 +76,7 @@ void start_context(size_t n_worker) {
 
 void stop_context() {
   _impl::_ctx::get_context().stop();
+  _impl::_sched::g_dispatcher->clear();
   _impl::_event::g_dispatcher = nullptr;
   _impl::_time::g_dispatcher = nullptr;
   _impl::_sched::g_dispatcher = nullptr;

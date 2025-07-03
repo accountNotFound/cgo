@@ -45,3 +45,19 @@ TEST(schedule, mutex) {
   cgo::stop_context();
   ASSERT(res == foo_num * foo_loop, "");
 }
+
+TEST(schedule, force_stop) {
+  std::atomic<int> res = 0;
+  cgo::Mutex mtx;
+
+  cgo::start_context(exec_num);
+  for (int i = 0; i < foo_num; ++i) {
+    cgo::spawn([](decltype(mtx)& mtx, decltype(res)& res) -> cgo::Coroutine<void> {
+      co_await mtx.lock();
+      res.fetch_add(1);
+    }(mtx, res));
+  }
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  cgo::stop_context();
+  ASSERT(res == 1, "");
+}

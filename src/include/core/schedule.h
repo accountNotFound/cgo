@@ -75,6 +75,8 @@ class TaskHandler {
 
 class TaskAllocator {
  public:
+  void clear();
+
   TaskHandler create(int id, Coroutine<void> fn, const std::string& name = "");
 
   void destroy(TaskHandler task);
@@ -129,6 +131,8 @@ class TaskCondition {
 class TaskDispatcher {
  public:
   TaskDispatcher(size_t n_partition) : _tid(0), _t_allocs(n_partition), _q_runnables(n_partition) {}
+
+  void clear();
 
   void create(Coroutine<void> fn, const std::string& name = "");
 

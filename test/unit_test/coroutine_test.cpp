@@ -57,7 +57,7 @@ TEST(coroutine, destroy) {
   auto f = biz(bar_throw_threshold);
   init(f);
   resume(f);
-  ASSERT(!f.done(), "");
+  ASSERT(!done(f), "");
   destroy(f);
 }
 
