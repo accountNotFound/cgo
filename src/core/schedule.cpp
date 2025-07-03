@@ -45,7 +45,7 @@ TaskHandler TaskAllocator::create(int id, Coroutine<void> fn, const std::string&
     task = &*this->_index[id];
     task->create_at = std::chrono::steady_clock::now();
   }
-  _impl::_coro::init(task->fn);
+  static_cast<_impl::CoroutineBase&>(task->fn).init();
   return task;
 }
 
@@ -92,8 +92,9 @@ void TaskExecutor::execute(TaskHandler task) {
   TaskExecutor::_t_running = task;
 
   task->execute_cnt++;
-  while (!TaskExecutor::_yield_flag && !TaskExecutor::_suspend_q_waiting && !_impl::_coro::done(task->fn)) {
-    _impl::_coro::resume(task->fn);
+  _impl::CoroutineBase& fn = task->fn;
+  while (!TaskExecutor::_yield_flag && !TaskExecutor::_suspend_q_waiting && !fn.done()) {
+    fn.resume();
   }
 
   if (TaskExecutor::_yield_flag) {

@@ -4,35 +4,46 @@
 #include <exception>
 #include <functional>
 
-namespace cgo::_impl::_coro {
+namespace cgo {
+
+namespace _impl {
+
+class CoroutineBase;
+
+namespace _coro {
 
 class PromiseBase {
  public:
-  static void init(PromiseBase* entry);
+  static void call_stack_create(PromiseBase* promise);
 
-  static void resume(PromiseBase* entry);
+  static void call_stack_destroy(PromiseBase* promise);
 
-  static bool done(PromiseBase* entry) { return entry->_handler.done(); }
+  static void call_stack_execute(PromiseBase* promise);
 
-  static void call_push(PromiseBase* caller, PromiseBase* callee);
-
-  static PromiseBase* call_pop(PromiseBase* p);
+  static void call_stack_push(PromiseBase* promise, PromiseBase* callee);
 
   virtual ~PromiseBase() = default;
 
-  std::suspend_always initial_suspend() noexcept { return {}; }
+  auto initial_suspend() noexcept -> std::suspend_always { return {}; }
 
-  std::suspend_always final_suspend() noexcept { return {}; }
+  auto final_suspend() noexcept -> std::suspend_always { return {}; }
 
   void unhandled_exception() noexcept { this->_exception = std::current_exception(); }
 
+ private:
+  static auto _call_stack_pop(PromiseBase* promise) -> PromiseBase*;
+
+ public:
+  CoroutineBase* coro = nullptr;
+
  protected:
+  std::exception_ptr _exception = nullptr;
+
+ private:
   PromiseBase* _caller = nullptr;
   PromiseBase* _callee = nullptr;
   PromiseBase* _entry = nullptr;
   PromiseBase* _current = nullptr;
-  std::coroutine_handle<> _handler = nullptr;
-  std::exception_ptr _exception = nullptr;
 };
 
 class VoidPromiseBase : public PromiseBase {
@@ -47,15 +58,9 @@ class ValuePromiseBase : public PromiseBase {
 
   void return_value(T&& value) { this->_value = std::move(value); }
 
-  std::suspend_always yield_value(T& value) {
-    this->_value = value;
-    return {};
-  }
+  auto yield_value(T& value) -> std::suspend_always { this->_value = value, return {}; }
 
-  std::suspend_always yield_value(T&& value) {
-    this->_value = std::move(value);
-    return {};
-  }
+  auto yield_value(T&& value) -> std::suspend_always { this->_value = std::move(value), return {}; }
 
  protected:
   T _value = {};
@@ -66,10 +71,7 @@ class ValuePromiseBase<T&> : public PromiseBase {
  public:
   void return_value(T& value) { this->_value = &value; }
 
-  std::suspend_always yield_value(T& value) {
-    this->_value = &value;
-    return {};
-  }
+  auto yield_value(T& value) -> std::suspend_always { this->_value = &value, return {}; }
 
  protected:
   T* _value = nullptr;
@@ -78,28 +80,46 @@ class ValuePromiseBase<T&> : public PromiseBase {
 template <typename T>
 class ValuePromiseBase<T&&> : public ValuePromiseBase<std::remove_reference_t<T>> {};
 
+}  // namespace _coro
+
 class CoroutineBase {
  public:
-  virtual ~CoroutineBase() = default;
+  template <typename T>
+  CoroutineBase(std::coroutine_handle<T> handler) : handler(handler), _promise(&handler.promise()) {}
 
-  virtual PromiseBase& promise() = 0;
+  CoroutineBase(const CoroutineBase&) = delete;
+
+  CoroutineBase(CoroutineBase&& rhs);
+
+  virtual ~CoroutineBase() { this->_destroy_coro_frame(); }
+
+  void init() { this->_promise->coro = this, _coro::PromiseBase::call_stack_create(this->_promise); }
+
+  void resume() { _coro::PromiseBase::call_stack_execute(this->_promise); }
+
+  bool done() { return this->handler.done(); }
+
+  void destroy() { _coro::PromiseBase::call_stack_destroy(this->_promise); }
+
+ private:
+  void _destroy_coro_frame();
+
+ public:
+  std::coroutine_handle<> handler;
+
+ protected:
+  _coro::PromiseBase* _promise;
 };
 
-inline void init(CoroutineBase& fn) { PromiseBase::init(&fn.promise()); }
-
-inline void resume(CoroutineBase& fn) { PromiseBase::resume(&fn.promise()); }
-
-inline bool done(CoroutineBase& fn) { return PromiseBase::done(&fn.promise()); }
-
-}  // namespace cgo::_impl::_coro
-
-namespace cgo {
+}  // namespace _impl
 
 /**
  * @note This class has no Return Value Optimization when `co_return`. So `co_return std::move(...)` if necessary
+ *
+ *      Don't move `Coroutine` object after `co_await` or the process will exit
  */
 template <typename T>
-class Coroutine : public _impl::_coro::CoroutineBase {
+class Coroutine : public _impl::CoroutineBase {
  public:
   using RetType = T;
 
@@ -108,65 +128,50 @@ class Coroutine : public _impl::_coro::CoroutineBase {
     friend class Coroutine;
 
    public:
-    promise_type() { this->_handler = std::coroutine_handle<promise_type>::from_promise(*this); }
-
     Coroutine get_return_object() { return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this)); }
 
-   protected:
-    using _impl::_coro::PromiseBase::call_pop;
-    using _impl::_coro::PromiseBase::call_push;
-    using _impl::_coro::PromiseBase::done;
-    using _impl::_coro::PromiseBase::init;
-    using _impl::_coro::PromiseBase::resume;
+   private:
+    using _impl::_coro::PromiseBase::call_stack_create;
+    using _impl::_coro::PromiseBase::call_stack_destroy;
+    using _impl::_coro::PromiseBase::call_stack_execute;
+    using _impl::_coro::PromiseBase::call_stack_push;
+
+   private:
+    using _impl::_coro::PromiseBase::coro;
   };
 
-  Coroutine() : _type_handler(nullptr) {}
+ public:
+  Coroutine() : Coroutine(nullptr) {}
 
-  Coroutine(const Coroutine&) = delete;
-
-  Coroutine(Coroutine&& rhs) {
-    this->_drop();
-    std::swap(this->_type_handler, rhs._type_handler);
-  }
-
-  ~Coroutine() { this->_drop(); }
-
-  bool await_ready() { return !this->_type_handler || this->_type_handler.done(); }
+  bool await_ready() { return !this->handler || this->handler.done(); }
 
   void await_suspend(std::coroutine_handle<> caller) {
     using P = promise_type;
     P* caller_promise = &std::coroutine_handle<P>::from_address(caller.address()).promise();
-    P* this_promise = &this->_type_handler.promise();
-    _impl::_coro::PromiseBase::call_push(caller_promise, this_promise);
+    this->_promise->coro = this;
+    _impl::_coro::PromiseBase::call_stack_push(caller_promise, this->_promise);
   }
 
   auto await_resume() {
-    if (auto& ex = this->_type_handler.promise()._exception; ex) {
+    if (auto& ex = this->get_promise()._exception; ex) {
       std::rethrow_exception(ex);
     }
     if constexpr (!std::is_void_v<T>) {
       if constexpr (std::is_lvalue_reference_v<T>) {
-        return std::ref(*this->_type_handler.promise()._value);
+        return std::ref(*this->get_promise()._value);
       } else {
-        return std::move(this->_type_handler.promise()._value);
+        return std::move(this->get_promise()._value);
       }
     }
   }
 
- protected:
-  Coroutine(std::coroutine_handle<promise_type> handler) : _type_handler(handler) {}
+ private:
+  Coroutine(std::coroutine_handle<promise_type> handler) : _impl::CoroutineBase(handler) {}
 
-  void _drop() {
-    if (this->_type_handler) {
-      this->_type_handler.destroy();
-      this->_type_handler = nullptr;
-    }
-  }
-
-  _impl::_coro::PromiseBase& promise() override { return this->_type_handler.promise(); }
+  promise_type& get_promise() { return dynamic_cast<promise_type&>(*this->_promise); }
 
  private:
-  std::coroutine_handle<promise_type> _type_handler;
+  using _impl::CoroutineBase::handler;
 };
 
 }  // namespace cgo

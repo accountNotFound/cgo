@@ -1,17 +1,34 @@
 #include "core/coroutine.h"
 
-namespace cgo::_impl::_coro {
+#include <iostream>
 
-void PromiseBase::init(PromiseBase* promise) { promise->_entry = promise->_current = promise; }
+namespace cgo {
 
-void PromiseBase::resume(PromiseBase* entry) {
+namespace _impl {
+
+namespace _coro {
+
+void PromiseBase::call_stack_create(PromiseBase* promise) { promise->_entry = promise->_current = promise; }
+
+void PromiseBase::call_stack_destroy(PromiseBase* promise) {
+  auto current = promise->_entry->_current;
+  while (current) {
+    current->_callee = nullptr;
+    current->coro->handler.destroy();
+    current->coro->handler = nullptr;
+    current = current->_caller;
+  }
+}
+
+void PromiseBase::call_stack_execute(PromiseBase* promise) {
+  PromiseBase* entry = promise->_entry;
   PromiseBase* next = entry->_current;
   PromiseBase* current = nullptr;
   do {
     current = next;
-    current->_handler.resume();
+    current->coro->handler.resume();
     if (auto& ex = current->_exception; ex) {
-      next = PromiseBase::call_pop(current);
+      next = PromiseBase::_call_stack_pop(entry);
       if (!next) {
         std::rethrow_exception(ex);
       }
@@ -19,28 +36,52 @@ void PromiseBase::resume(PromiseBase* entry) {
       entry->_current = next;
       continue;
     }
-    if (current->_handler.done()) {
-      next = PromiseBase::call_pop(current);
+    if (current->coro->handler.done()) {
+      next = PromiseBase::_call_stack_pop(entry);
       continue;
     }
     next = entry->_current;
   } while (next && current != next);
 }
 
-void PromiseBase::call_push(PromiseBase* caller, PromiseBase* callee) {
+void PromiseBase::call_stack_push(PromiseBase* promise, PromiseBase* callee) {
+  auto caller = promise->_entry->_current;
   caller->_callee = callee;
   callee->_caller = caller;
   callee->_entry = caller->_entry;
   callee->_entry->_current = callee;
 }
 
-PromiseBase* PromiseBase::call_pop(PromiseBase* promise) {
-  if (promise->_caller) {
-    promise->_caller->_callee = nullptr;
-    promise->_entry = promise->_caller;
-    return promise->_caller;
+auto PromiseBase::_call_stack_pop(PromiseBase* promise) -> PromiseBase* {
+  auto entry = promise->_entry;
+  auto current = entry->_current;
+  if (current->_caller) {
+    current->_caller->_callee = nullptr;
+    entry->_current = current->_caller;
+    return entry->_current;
   }
-  return nullptr;
+  return current = nullptr;
 }
 
-}  // namespace cgo::_impl::_coro
+}  // namespace _coro
+
+CoroutineBase::CoroutineBase(CoroutineBase&& rhs) {
+  if (this->_promise->coro) {
+    std::cerr << "coroutine can't be moved anymore after `init()` or `co_await`\n";
+    std::exit(EXIT_FAILURE);
+  }
+  this->_destroy_coro_frame();
+  std::swap(this->handler, rhs.handler);
+  std::swap(this->_promise, rhs._promise);
+}
+
+void CoroutineBase::_destroy_coro_frame() {
+  if (this->handler) {
+    this->handler.destroy();
+    this->handler = nullptr;
+  }
+}
+
+}  // namespace _impl
+
+}  // namespace cgo
