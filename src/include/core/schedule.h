@@ -2,10 +2,11 @@
 
 #include <any>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
-#include <functional>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <unordered_map>
 #include <vector>
@@ -14,19 +15,42 @@
 
 namespace cgo {
 
+namespace _impl {
+
 class Spinlock {
  public:
   void lock();
 
-  void unlock() { this->_flag.store(false); }
+  void unlock();
 
  private:
-  std::atomic<bool> _flag = false;
+  std::atomic<bool> _lock_flag = false;
 };
 
-namespace _impl {
+template <typename T>
+class LockfreeQueue {
+ public:
+  void push(T&& x) {
+    std::unique_lock guard(this->_mtx);
+    this->_que.push(std::forward<T>(x));
+  }
 
-class SignalBase {
+  auto pop() -> std::optional<T> {
+    std::unique_lock guard(this->_mtx);
+    if (this->_que.empty()) {
+      return std::nullopt;
+    }
+    auto res = std::move(this->_que.front());
+    this->_que.pop();
+    return res;
+  }
+
+ protected:
+  Spinlock _mtx;
+  std::queue<T> _que;
+};
+
+class LazySignalBase {
  public:
   virtual void emit();
 
@@ -39,122 +63,140 @@ class SignalBase {
   bool _wait_flag = false;
 };
 
-}  // namespace _impl
-
-namespace _impl::_sched {
+namespace _sched {
 
 struct Task {
-  const int id;
+ public:
+  Context* const ctx;
+  int const id;
   Coroutine<void> fn;
-  const std::string name;
+  std::vector<std::any> locals;
 
-  std::vector<std::any> locals = {};
-  std::chrono::steady_clock::time_point create_at = {};
+  // fields for debugging
+  std::chrono::steady_clock::time_point create_at;
+  std::string name = "";
   int execute_cnt = 0;
   int yield_cnt = 0;
   int suspend_cnt = 0;
 
-  Task(int id, Coroutine<void> fn, const std::string& name) : id(id), fn(std::move(fn)), name(name) {}
-};
+  Task(Context* ctx, int id, Coroutine<void> fn, std::string&& name = "")
+      : ctx(ctx), id(id), fn(std::move(fn)), name(std::forward<std::string>(name)) {
+    this->create_at = std::chrono::steady_clock::now();
+  }
 
-class TaskHandler {
- public:
-  TaskHandler() = default;
+  Task(const Task&) = delete;
 
-  TaskHandler(Task* task) : _task(task) {}
-
-  Task& get() { return *this->_task; }
-
-  operator bool() const { return this->_task; }
-
-  Task* operator->() const { return this->_task; }
-
- private:
-  Task* _task = nullptr;
+  Task(Task&&) = delete;
 };
 
 class TaskAllocator {
  public:
+  struct NoopDeletor {
+    void operator()(void*) const {}
+  };
+
+  using Handler = std::unique_ptr<Task, NoopDeletor>;
+
+  auto create(Context* ctx, int id, Coroutine<void> fn, std::string&& name = "") -> Handler;
+
+  void destroy(Handler task);
+
   void clear();
 
-  TaskHandler create(int id, Coroutine<void> fn, const std::string& name = "");
-
-  void destroy(TaskHandler task);
-
  private:
   Spinlock _mtx;
-  std::unordered_map<int, std::list<Task>::iterator> _index;
   std::list<Task> _pool;
+  std::unordered_map<int, std::list<Task>::iterator> _index;
 };
 
-class TaskQueue {
+class TaskScheduler : public LockfreeQueue<TaskAllocator::Handler> {
  public:
-  void push(TaskHandler task);
+  void push(TaskAllocator::Handler task);
 
-  TaskHandler pop();
-
-  void regist(_impl::SignalBase& signal) { this->_signal = &signal; }
+  void on_scheduled(LazySignalBase& signal) { this->_signal = &signal; }
 
  private:
-  Spinlock _mtx;
-  std::queue<TaskHandler> _que;
-  _impl::SignalBase* _signal = nullptr;
-};
-
-class TaskExecutor {
- public:
-  static TaskHandler& get_running_task() { return TaskExecutor::_t_running; }
-
-  static Coroutine<void> yield_running_task();
-
-  static Coroutine<void> suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& cond_lock);
-
-  static void execute(TaskHandler task);
-
- private:
-  inline static thread_local TaskHandler _t_running = nullptr;
-  inline static thread_local TaskQueue* _suspend_q_waiting = nullptr;
-  inline static thread_local Spinlock* _suspend_cond_lock = nullptr;
-  inline static thread_local bool _yield_flag = false;
+  LazySignalBase* _signal = nullptr;
 };
 
 class TaskCondition {
  public:
+  using BlockedQueue = LockfreeQueue<TaskAllocator::Handler>;
+
   Coroutine<void> wait(std::unique_lock<Spinlock>& lock);
 
   void notify();
 
  private:
-  TaskQueue _q_waiting;
+  BlockedQueue _blocked_tasks;
 };
 
-class TaskDispatcher {
+class TaskExecutor {
  public:
-  TaskDispatcher(size_t n_partition) : _tid(0), _t_allocs(n_partition), _q_runnables(n_partition) {}
+  static void exec(TaskAllocator::Handler task);
 
-  void clear();
+  static Coroutine<void> yield();
 
-  void create(Coroutine<void> fn, const std::string& name = "");
+  static Coroutine<void> wait(TaskCondition::BlockedQueue* cond_queue, Spinlock* cond_mutex);
 
-  void destroy(TaskHandler task);
-
-  void submit(TaskHandler task);
-
-  TaskHandler dispatch(size_t p_index);
-
-  void regist(size_t p_index, SignalBase& signal) { this->_q_runnables[p_index].regist(signal); }
+  static auto get() -> Task& { return *TaskExecutor::_running_task; }
 
  private:
-  std::atomic<int> _tid;
-  std::vector<TaskAllocator> _t_allocs;
-  std::vector<TaskQueue> _q_runnables;
+  inline static thread_local TaskAllocator::Handler _running_task = nullptr;
+  inline static thread_local TaskCondition::BlockedQueue* _cond_queue = nullptr;
+  inline static thread_local Spinlock* _cond_mutex = nullptr;
+  inline static thread_local bool _yield_flag = false;
 };
 
-inline std::unique_ptr<TaskDispatcher> g_dispatcher = nullptr;
+template <typename Derieved>
+class Partition {
+ public:
+  static auto get(Context* ctx) -> Partition& { return Derieved::get(ctx); }
 
-inline TaskDispatcher& get_dispatcher() { return *g_dispatcher; }
+  Partition(size_t n_partition) : _partitions(n_partition) {}
 
-}  // namespace _impl::_sched
+  int allocate_id() { return this->_tid.fetch_add(1); }
+
+  auto allocator(int i) -> TaskAllocator& { return this->_partitions[this->_loc(i)].allocator; }
+
+  auto scheduler(int i) -> TaskScheduler& { return this->_partitions[this->_loc(i)].scheduler; }
+
+ protected:
+  struct Impl {
+    TaskAllocator allocator;
+    TaskScheduler scheduler;
+  };
+
+  std::atomic<int> _tid = 0;
+  std::vector<Impl> _partitions;
+
+  int _loc(int i) { return i % this->_partitions.size(); }
+};
+
+}  // namespace _sched
+
+class TaskProcessor : public _sched::Partition<TaskProcessor> {
+ public:
+  static auto get(Context* ctx) -> TaskProcessor&;
+
+  TaskProcessor(size_t n_partition) : _sched::Partition<TaskProcessor>(n_partition) {}
+
+  ~TaskProcessor() { this->_drop_all_tasks(); }
+
+  void on_scheduled(size_t pindex, LazySignalBase& signal) { this->scheduler(pindex).on_scheduled(signal); }
+
+  int run_scheduled(size_t pindex, size_t batch_size);
+
+ private:
+  using _sched::Partition<TaskProcessor>::get;
+  using _sched::Partition<TaskProcessor>::allocate_id;
+  using _sched::Partition<TaskProcessor>::allocator;
+  using _sched::Partition<TaskProcessor>::scheduler;
+
+  void _drop_all_tasks();
+};
+
+}  // namespace _impl
 
 class Semaphore {
  public:
@@ -169,7 +211,7 @@ class Semaphore {
   int count() { return this->_vacant; }
 
  private:
-  Spinlock _mtx;
+  _impl::Spinlock _mtx;
   _impl::_sched::TaskCondition _cond;
   int _vacant;
 };
@@ -206,14 +248,14 @@ class DeferGuard {
   return DeferGuard(std::forward<std::function<void()>>(fn));
 }
 
-inline void spawn(Coroutine<void> fn, const std::string& name = "") {
-  _impl::_sched::get_dispatcher().create(std::move(fn), name);
-}
+inline Coroutine<void> yield() { return _impl::_sched::TaskExecutor::yield(); }
 
-inline Coroutine<void> yield() { return _impl::_sched::TaskExecutor::yield_running_task(); }
+inline int this_coroutine_id() { return _impl::_sched::TaskExecutor::get().id; }
 
-inline int this_coroutine_id() { return _impl::_sched::TaskExecutor::get_running_task()->id; }
+inline auto this_coroutine_ctx() -> Context* { return _impl::_sched::TaskExecutor::get().ctx; }
 
-inline auto& this_coroutine_locals() { return _impl::_sched::TaskExecutor::get_running_task()->locals; }
+inline auto& this_coroutine_locals() { return _impl::_sched::TaskExecutor::get().locals; }
+
+void spawn(Context* ctx, Coroutine<void> fn, std::string&& name = "");
 
 }  // namespace cgo

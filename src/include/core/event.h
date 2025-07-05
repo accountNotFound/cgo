@@ -96,7 +96,7 @@ inline EventDispatcher& get_dispatcher() { return *g_dispatcher; }
 
 namespace cgo::_impl {
 
-class EventSignal : public SignalBase {
+class EventSignal : public LazySignalBase {
  public:
   EventSignal();
 

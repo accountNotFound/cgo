@@ -4,31 +4,38 @@
 
 #include "core/schedule.h"
 
-namespace cgo::_impl::_ctx {
+namespace cgo {
 
-class Context {
+namespace _impl::_ctx {
+
+struct ContextBase {
  public:
-  void start(size_t n_worker);
+  ContextBase();
+
+  virtual ~ContextBase();
+
+  struct Impl;
+  std::unique_ptr<Impl> impl;
+};
+
+}  // namespace _impl::_ctx
+
+class Context : public _impl::_ctx::ContextBase {
+ public:
+  Context() = default;
+
+  Context(const Context&) = delete;
+
+  Context(Context&&) = delete;
+
+  void start(size_t n_workers);
 
   void stop();
 
-  void run_worker(size_t index);
-
  private:
+  using _impl::_ctx::ContextBase::Impl;
+  using _impl::_ctx::ContextBase::impl;
   std::vector<std::thread> _workers;
-  bool _finished = false;
 };
-
-inline std::unique_ptr<Context> g_context = nullptr;
-
-inline Context& get_context() { return *g_context; }
-
-}  // namespace cgo::_impl::_ctx
-
-namespace cgo {
-
-void start_context(size_t n_worker);
-
-void stop_context();
 
 }  // namespace cgo
