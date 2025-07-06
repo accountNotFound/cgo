@@ -2,87 +2,84 @@
 
 #include <iostream>
 
-namespace cgo {
+namespace cgo::_impl {
 
-namespace _impl {
+BaseFrame::BaseFrame(BaseFrame&& rhs) {
+  if (_promise && _promise->_onwer) {
+    std::cerr << "coroutine can't be moved anymore after `init()` or `co_await`\n";
+    std::exit(EXIT_FAILURE);
+  }
+  _destroy();
+  std::swap(_handler, rhs._handler);
+  std::swap(_promise, rhs._promise);
+}
 
-namespace _coro {
-
-void PromiseBase::call_stack_create(PromiseBase* promise) { promise->_entry = promise->_current = promise; }
-
-void PromiseBase::call_stack_destroy(PromiseBase* promise) {
-  auto current = promise->_entry->_current;
-  while (current) {
-    auto handler = current->coro->handler;
-    auto next = current->_caller;
-    current->coro->handler = nullptr;
-    handler.destroy();
-    current = next;
+void BaseFrame::_destroy() {
+  if (_handler) {
+    _handler.destroy();
+    _handler = nullptr;
   }
 }
 
-void PromiseBase::call_stack_execute(PromiseBase* promise) {
-  PromiseBase* entry = promise->_entry;
-  PromiseBase* next = entry->_current;
-  PromiseBase* current = nullptr;
-  do {
-    current = next;
-    current->coro->handler.resume();
-    if (auto& ex = current->_exception; ex) {
-      next = PromiseBase::_call_stack_pop(entry);
-      if (!next) {
-        std::rethrow_exception(ex);
-      }
-      next->_exception = ex;
-      entry->_current = next;
-      continue;
-    }
-    if (current->coro->handler.done()) {
-      next = PromiseBase::_call_stack_pop(entry);
-      continue;
-    }
-    next = entry->_current;
-  } while (next && current != next);
-}
-
-void PromiseBase::call_stack_push(PromiseBase* promise, PromiseBase* callee) {
-  auto caller = promise->_entry->_current;
+void BaseFrame::BasePromise::_call_stack_push(BaseFrame::BasePromise* callee) {
+  auto caller = _entry->_current;
   caller->_callee = callee;
   callee->_caller = caller;
   callee->_entry = caller->_entry;
   callee->_entry->_current = callee;
 }
 
-auto PromiseBase::_call_stack_pop(PromiseBase* promise) -> PromiseBase* {
-  auto entry = promise->_entry;
+auto BaseFrame::BasePromise::_call_stack_pop() -> BaseFrame::BasePromise* {
+  auto entry = _onwer->_promise->_entry;
   auto current = entry->_current;
   if (current->_caller) {
     current->_caller->_callee = nullptr;
     entry->_current = current->_caller;
     return entry->_current;
   }
-  return current = nullptr;
+  return nullptr;
 }
 
-}  // namespace _coro
+void FrameOperator::_call_stack_create(BaseFrame& entry) const {
+  auto promise = entry._promise;
+  promise->_onwer = &entry;
+  promise->_entry = promise->_current = promise;
+}
 
-CoroutineBase::CoroutineBase(CoroutineBase&& rhs) {
-  if (this->_promise && this->_promise->coro) {
-    std::cerr << "coroutine can't be moved anymore after `init()` or `co_await`\n";
-    std::exit(EXIT_FAILURE);
+void FrameOperator::_call_stack_destroy(BaseFrame& entry) const {
+  auto promise = entry._promise;
+  auto current = promise->_entry->_current;
+  while (current) {
+    auto handler = current->_onwer->_handler;
+    auto next = current->_caller;
+    current->_onwer->_handler = nullptr;
+    handler.destroy();
+    current = next;
   }
-  this->_destroy_coro_frame();
-  std::swap(this->handler, rhs.handler);
-  std::swap(this->_promise, rhs._promise);
 }
 
-void CoroutineBase::_destroy_coro_frame() {
-  if (this->handler) {
-    this->handler.destroy();
-    this->handler = nullptr;
-  }
+void FrameOperator::_call_stack_execute(BaseFrame& f) const {
+  BaseFrame::BasePromise* entry = f._promise->_entry;
+  BaseFrame::BasePromise* next = entry->_current;
+  BaseFrame::BasePromise* current = nullptr;
+  do {
+    current = next;
+    current->_onwer->_handler.resume();
+    if (auto& ex = current->_error; ex) {
+      next = entry->_call_stack_pop();
+      if (!next) {
+        std::rethrow_exception(ex);
+      }
+      next->_error = ex;
+      entry->_current = next;
+      continue;
+    }
+    if (current->_onwer->_handler.done()) {
+      next = entry->_call_stack_pop();
+      continue;
+    }
+    next = entry->_current;
+  } while (next && current != next);
 }
 
-}  // namespace _impl
-
-}  // namespace cgo
+}  // namespace cgo::_impl

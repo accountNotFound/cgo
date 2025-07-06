@@ -44,7 +44,7 @@ auto TaskAllocator::create(Context* ctx, int id, Coroutine<void> fn, std::string
     this->_index[id] = this->_pool.emplace(this->_pool.end(), ctx, id, std::move(fn), std::forward<std::string>(name));
     task = &*this->_index[id];
   }
-  static_cast<_impl::CoroutineBase&>(task->fn).init();
+  FrameOperator().init(task->fn);
   return Handler(task);
 }
 
@@ -59,7 +59,7 @@ void TaskAllocator::destroy(TaskAllocator::Handler task) {
 
 void TaskAllocator::clear() {
   for (auto& task : this->_pool) {
-    static_cast<_impl::CoroutineBase&>(task.fn).destroy();
+    FrameOperator().destroy(task.fn);
   }
 }
 
@@ -101,11 +101,9 @@ void TaskExecutor::exec(TaskAllocator::Handler task) {
   TaskExecutor::_yield_flag = false;
 
   auto& current = TaskExecutor::_running_task;
-  auto& fn = static_cast<CoroutineBase&>(current->fn);
-
   ++current->execute_cnt;
-  while (!TaskExecutor::_cond_mutex && !TaskExecutor::_yield_flag && !fn.done()) {
-    fn.resume();
+  while (!TaskExecutor::_cond_mutex && !TaskExecutor::_yield_flag && !FrameOperator().done(current->fn)) {
+    FrameOperator().resume(current->fn);
   }
   if (TaskExecutor::_cond_mutex) {
     ++current->suspend_cnt;

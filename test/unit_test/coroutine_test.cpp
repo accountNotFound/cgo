@@ -7,6 +7,14 @@
 const int bar_throw_threshold = 5;
 int suspend_cnt = 0;
 
+void init(cgo::_impl::BaseFrame& f) { cgo::_impl::FrameOperator().init(f); }
+
+void resume(cgo::_impl::BaseFrame& f) { cgo::_impl::FrameOperator().resume(f); }
+
+bool done(cgo::_impl::BaseFrame& f) { return cgo::_impl::FrameOperator().done(f); }
+
+void destroy(cgo::_impl::BaseFrame& f) { cgo::_impl::FrameOperator().destroy(f); }
+
 cgo::Coroutine<int> bar(int n) {
   int res = 0;
   for (int i = 0; i < n; i++) {
@@ -33,14 +41,6 @@ cgo::Coroutine<void> biz(int n) {
   std::string s = std::any_cast<std::string>(std::move(res));
   // printf("biz get: %s\n", s.data());
 }
-
-void init(cgo::_impl::CoroutineBase& f) { f.init(); }
-
-void resume(cgo::_impl::CoroutineBase& f) { f.resume(); }
-
-bool done(cgo::_impl::CoroutineBase& f) { return f.done(); }
-
-void destroy(cgo::_impl::CoroutineBase& f) { f.destroy(); }
 
 TEST(coroutine, suspend) {
   suspend_cnt = 0;
