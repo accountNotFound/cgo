@@ -96,15 +96,15 @@ inline EventDispatcher& get_dispatcher() { return *g_dispatcher; }
 
 namespace cgo::_impl {
 
-class EventSignal : public LazySignalBase {
+class EventSignal : public BaseLazySignal {
  public:
   EventSignal();
 
   void close();
 
-  void emit() override;
+  void _emit() override;
 
-  void wait(std::chrono::duration<double, std::milli> timeout) override;
+  void _wait(std::unique_lock<Spinlock>& guard, std::chrono::duration<double, std::milli> timeout) override;
 
  private:
   int _fd;

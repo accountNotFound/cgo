@@ -26,7 +26,7 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
   ctx.start(exec_num);
 
   for (int i = 0; i < n_reader; i++) {
-    cgo::spawn(&ctx,
+    cgo::spawn(ctx,
                [](decltype(r_res)& r_res, decltype(add)& add, decltype(chan) chan,
                   decltype(n_reader) n_reader) -> cgo::Coroutine<void> {
                  for (int i = 0; i < msg_num / n_reader; i++) {
@@ -40,7 +40,7 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
   }
 
   for (int i = 0; i < n_writer; i++) {
-    cgo::spawn(&ctx,
+    cgo::spawn(ctx,
                [](decltype(r_res)& w_res, decltype(chan) chan, decltype(n_writer) n_writer) -> cgo::Coroutine<void> {
                  for (int i = 0; i < msg_num / n_writer; i++) {
                    int v = i;
@@ -94,7 +94,7 @@ void select_read_test(int n_reader, int buffer_size) {
   ctx.start(exec_num);
 
   for (int i = 0; i < n_reader; ++i) {
-    cgo::spawn(&ctx,
+    cgo::spawn(ctx,
                [](decltype(chans)& chans, decltype(r_res)& r_res, decltype(cnt)& cnt,
                   decltype(values)& values) -> cgo::Coroutine<void> {
                  while (cnt.load() < msg_num) {
@@ -111,7 +111,7 @@ void select_read_test(int n_reader, int buffer_size) {
                }(chans, r_res, cnt, values));
   }
 
-  cgo::spawn(&ctx, [](decltype(chans)& chans, decltype(w_res)& w_res) -> cgo::Coroutine<void> {
+  cgo::spawn(ctx, [](decltype(chans)& chans, decltype(w_res)& w_res) -> cgo::Coroutine<void> {
     for (int i = 0; i < msg_num; ++i) {
       int r = std::rand() % 3;
       co_await (chans[r] << i);
@@ -158,7 +158,7 @@ void select_test(int n_writer, int n_reader, int buffer_size) {
   ctx.start(exec_num);
 
   for (int i = 0; i < n_reader; i++) {
-    cgo::spawn(&ctx,
+    cgo::spawn(ctx,
                [](decltype(r_res)& r_res, decltype(chans)& chans, decltype(add)& add,
                   decltype(n_reader) n_reader) -> cgo::Coroutine<void> {
                  for (int i = 0; i < msg_num / n_reader; i++) {
@@ -177,7 +177,7 @@ void select_test(int n_writer, int n_reader, int buffer_size) {
   }
 
   for (int i = 0; i < n_writer; i++) {
-    cgo::spawn(&ctx,
+    cgo::spawn(ctx,
                [](decltype(w_res)& w_res, decltype(chans)& chans, decltype(n_writer) n_writer) -> cgo::Coroutine<void> {
                  for (int i = 0; i < msg_num / n_writer; i++) {
                    cgo::Select select;

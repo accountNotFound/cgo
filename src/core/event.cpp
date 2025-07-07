@@ -107,28 +107,12 @@ void EventSignal::close() {
   ::close(this->_fd);
 }
 
-void EventSignal::emit() {
-  if (this->_wait_flag && !this->_signal_flag && !this->_event_flag) {
-    std::unique_lock guard(this->_mtx);
-    if (this->_wait_flag && !this->_signal_flag && !this->_event_flag) {
-      ::write(this->_fd, &this->_event_flag, sizeof(this->_event_flag));
-      this->_signal_flag = true;
-    }
-  }
-}
+void EventSignal::_emit() { ::write(this->_fd, &this->_event_flag, sizeof(this->_event_flag)); }
 
-void EventSignal::wait(std::chrono::duration<double, std::milli> duration) {
-  if (!this->_signal_flag) {
-    std::unique_lock guard(this->_mtx);
-    if (!this->_signal_flag) {
-      this->_signal_flag = false;
-      this->_wait_flag = true;
-      this->_cond.wait_for(guard, duration);
-      _event::get_dispatcher().mod(this->_fd, _event::Event::IN | _event::Event::ONESHOT,
-                                   [this](_event::Event ev) { this->_callback(ev); });
-      this->_wait_flag = false;
-    }
-  }
+void EventSignal::_wait(std::unique_lock<Spinlock>& guard, std::chrono::duration<double, std::milli> duration) {
+  this->_cond.wait_for(guard, duration);
+  _event::get_dispatcher().mod(this->_fd, _event::Event::IN | _event::Event::ONESHOT,
+                               [this](_event::Event ev) { this->_callback(ev); });
 }
 
 void EventSignal::_callback(_event::Event ev) {

@@ -92,20 +92,20 @@ class BaseFrame {
 
 class FrameOperator {
  public:
-  void init(BaseFrame& entry) const { _call_stack_create(entry); }
+  static void init(BaseFrame& entry) { _call_stack_create(entry); }
 
-  void resume(BaseFrame& entry) const { _call_stack_execute(entry); }
+  static void resume(BaseFrame& entry) { _call_stack_execute(entry); }
 
-  void destroy(BaseFrame& entry) const { _call_stack_destroy(entry); }
+  static void destroy(BaseFrame& entry) { _call_stack_destroy(entry); }
 
-  bool done(BaseFrame& entry) const { return entry._handler.done(); }
+  static bool done(BaseFrame& entry) { return entry._handler.done(); }
 
  private:
-  void _call_stack_create(BaseFrame& entry) const;
+  static void _call_stack_create(BaseFrame& entry);
 
-  void _call_stack_destroy(BaseFrame& entry) const;
+  static void _call_stack_destroy(BaseFrame& entry);
 
-  void _call_stack_execute(BaseFrame& entry) const;
+  static void _call_stack_execute(BaseFrame& entry);
 };
 
 }  // namespace cgo::_impl
@@ -126,6 +126,8 @@ class Coroutine : public _impl::BaseFrame {
    public:
     Coroutine get_return_object() { return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this)); }
   };
+
+  void* address() const { return _handler.address(); }
 
   bool await_ready() { return _handler.done(); }
 

@@ -6,21 +6,9 @@
 
 namespace cgo {
 
-namespace _impl::_ctx {
+class Context {
+  friend class _impl::SchedContext;
 
-struct ContextBase {
- public:
-  ContextBase();
-
-  virtual ~ContextBase();
-
-  struct Impl;
-  std::unique_ptr<Impl> impl;
-};
-
-}  // namespace _impl::_ctx
-
-class Context : public _impl::_ctx::ContextBase {
  public:
   Context() = default;
 
@@ -28,14 +16,18 @@ class Context : public _impl::_ctx::ContextBase {
 
   Context(Context&&) = delete;
 
-  void start(size_t n_workers);
+  void start(size_t n_worker);
 
   void stop();
 
+  bool closed() const { return _finished; }
+
  private:
-  using _impl::_ctx::ContextBase::Impl;
-  using _impl::_ctx::ContextBase::impl;
   std::vector<std::thread> _workers;
+  std::unique_ptr<_impl::SchedContext> _sched_ctx = nullptr;
+  bool _finished = false;
+
+  void _run(size_t pindex);
 };
 
 }  // namespace cgo
