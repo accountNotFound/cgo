@@ -60,7 +60,13 @@ void Context::_run(size_t pindex) {
     if (sched_flag || timed_flag) {
       continue;
     }
-    signal.wait(std::chrono::milliseconds(50));
+    auto next_sched_time = _timed_ctx->next_schedule_time(pindex);
+    if (auto now = std::chrono::steady_clock::now(); now >= next_sched_time) {
+      continue;
+    } else {
+      auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(next_sched_time - now);
+      signal.wait(std::min(timeout, std::chrono::milliseconds(50)));
+    }
   }
 }
 

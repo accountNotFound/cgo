@@ -1,5 +1,5 @@
 #include "core/event.h"
-#include "core/timer.h"
+#include "core/timed.h"
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
 

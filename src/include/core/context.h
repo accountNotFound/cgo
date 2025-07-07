@@ -3,7 +3,7 @@
 #include <thread>
 
 #include "core/schedule.h"
-#include "core/timer.h"
+#include "core/timed.h"
 
 namespace cgo {
 
