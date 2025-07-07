@@ -78,65 +78,6 @@ TEST(channel, w2r5b1) { channel_test(2, 5, 5); }
 
 TEST(channel, w5r2b1) { channel_test(5, 2, 5); }
 
-void select_read_test(int n_reader, int buffer_size) {
-  std::array<cgo::Channel<int>, 3> chans;
-  for (int i = 0; i < 3; i++) {
-    chans[i] = cgo::Channel<int>(buffer_size);
-  }
-
-  std::atomic<int> r_res = 0, w_res = 0;
-
-  std::atomic<int> cnt = 0;
-
-  std::vector<int> values(msg_num, -1);
-
-  cgo::Context ctx;
-  ctx.start(exec_num);
-
-  for (int i = 0; i < n_reader; ++i) {
-    cgo::spawn(ctx,
-               [](decltype(chans)& chans, decltype(r_res)& r_res, decltype(cnt)& cnt,
-                  decltype(values)& values) -> cgo::Coroutine<void> {
-                 while (cnt.load() < msg_num) {
-                   cgo::Select select;
-                   int v;
-                   select.on(0, chans[0]) >> v;
-                   select.on(1, chans[1]) >> v;
-                   select.on(2, chans[2]) >> v;
-                   co_await select();
-                   ASSERT(values[v] == -1, "select %d which already read\n", v);
-                   values[v] = v;
-                 }
-                 r_res.fetch_add(1);
-               }(chans, r_res, cnt, values));
-  }
-
-  cgo::spawn(ctx, [](decltype(chans)& chans, decltype(w_res)& w_res) -> cgo::Coroutine<void> {
-    for (int i = 0; i < msg_num; ++i) {
-      int r = std::rand() % 3;
-      co_await (chans[r] << i);
-    }
-    w_res.fetch_add(1);
-  }(chans, w_res));
-
-  while (r_res < n_reader && w_res < 1) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  ctx.stop();
-
-  for (int i = 0; i < msg_num; ++i) {
-    ASSERT(values[i] == i, "values[%d]==%d\n", i, values[i]);
-  }
-}
-
-// TEST(channel, select_r2b0) { select_read_test(2, 0); }
-
-// TEST(channel, select_r5b0) { select_read_test(5, 0); }
-
-// TEST(channel, select_r2b5) { select_read_test(2, 5); }
-
-// TEST(channel, select_r5b5) { select_read_test(5, 5); }
-
 void select_test(int n_writer, int n_reader, int buffer_size) {
   ASSERT(mod(msg_num, n_reader) == 0 && mod(msg_num, n_writer) == 0, "");
 
@@ -219,3 +160,64 @@ TEST(channel, select_w5r2b0) { select_test(5, 2, 0); }
 TEST(channel, select_w2r5b1) { select_test(2, 5, 5); }
 
 TEST(channel, select_w5r2b1) { select_test(5, 2, 5); }
+
+void multi_ctx_test(int buffer_size) {
+  const size_t n_reader = 4;
+
+  std::array<cgo::Channel<int>, n_reader> chans;
+  for (int i = 0; i < n_reader; i++) {
+    chans[i] = cgo::Channel<int>(buffer_size);
+  }
+
+  std::atomic<int> r_res = 0, w_res = 0;
+
+  std::atomic<int> cnt = 0;
+
+  std::vector<int> values(msg_num, -1);
+
+  cgo::Context ctx1, ctx2;
+  ctx1.start(n_reader);
+  ctx2.start(1);
+
+  for (int i = 0; i < n_reader; ++i) {
+    cgo::spawn(ctx1,
+               [](decltype(chans[0])& chan, decltype(r_res)& r_res, decltype(cnt)& cnt,
+                  decltype(values)& values) -> cgo::Coroutine<void> {
+                 while (cnt.load() < msg_num) {
+                   int v;
+                   co_await (chan >> v);
+                   ASSERT(values[v] == -1, "");
+                   values[v] = v;
+                 }
+                 r_res.fetch_add(1);
+               }(chans[i], r_res, cnt, values));
+  }
+
+  cgo::spawn(ctx2, [](decltype(chans)& chans, decltype(w_res)& w_res) -> cgo::Coroutine<void> {
+    for (int i = 0; i < msg_num;) {
+      int r = std::rand() % n_reader;
+      if (chans[r].nowait() << i) {
+        ++i;
+      } else {
+        co_await cgo::yield();
+      }
+    }
+    w_res.fetch_add(1);
+  }(chans, w_res));
+
+  while (r_res < n_reader && w_res < 1) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  ctx1.stop();
+  ctx2.stop();
+
+  for (int i = 0; i < msg_num; ++i) {
+    ASSERT(values[i] == i, "values[%d]==%d\n", i, values[i]);
+  }
+}
+
+TEST(channel, multi_ctx_b0) { multi_ctx_test(0); }
+
+TEST(channel, multi_ctx_b2) { multi_ctx_test(2); }
+
+TEST(channel, multi_ctx_b8) { multi_ctx_test(8); }

@@ -37,6 +37,7 @@ TEST(schedule, mutex) {
         co_await mtx.lock();
         auto guard = cgo::defer([&mtx]() { mtx.unlock(); });
         res++;
+        co_await cgo::yield();
       }
     }(res, mtx));
   }
