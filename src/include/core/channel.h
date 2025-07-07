@@ -200,10 +200,9 @@ class Select {
  private:
   template <typename T>
   class Case {
-   public:
-    Case(Select& select, _impl::_chan::Channel<T>& chan, int key, std::shared_ptr<_impl::_chan::SelectReducer>& reducer)
-        : _select(&select), _chan(&chan), _key(key), _reducer(reducer) {}
+    friend class Select;
 
+   public:
     void operator<<(T& x) {
       this->_select->_invokers.emplace_back([x, chan = _chan, key = _key, reducer = _reducer]() {
         chan->recv_from(_impl::_chan::ChanEvent(&x, key, reducer));
@@ -238,7 +237,9 @@ class Select {
     _impl::_chan::Channel<T>* _chan;
     int _key;
     std::shared_ptr<_impl::_chan::SelectReducer> _reducer;
-    ;
+
+    Case(Select& select, _impl::_chan::Channel<T>& chan, int key, std::shared_ptr<_impl::_chan::SelectReducer>& reducer)
+        : _select(&select), _chan(&chan), _key(key), _reducer(reducer) {}
   };
 
  public:
@@ -276,12 +277,9 @@ class Select {
  * @note Returned channel will contain `cgo::Nil{}` if `T=void`
  */
 template <typename T, typename V = std::conditional_t<std::is_void_v<T>, Nil, T>>
-Channel<V> collect(Coroutine<T> fn) {
+Channel<V> collect(Context& ctx, Coroutine<T> fn) {
   Channel<V> chan(0);
-  cgo::spawn([](Coroutine<T> fn, Channel<V> chan) -> cgo::Coroutine<void> {
-    cgo::this_coroutine_locals().resize(1);
-    cgo::this_coroutine_locals()[0] = chan;
-
+  cgo::spawn(ctx, [](Coroutine<T> fn, Channel<V> chan) -> cgo::Coroutine<void> {
     if constexpr (std::is_void_v<T>) {
       co_await fn;
       co_await (chan << Nil{});

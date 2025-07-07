@@ -186,7 +186,7 @@ class Semaphore {
 
   void release();
 
-  size_t count() { return this->_vacant; }
+  size_t count() { return _vacant; }
 
  private:
   _impl::Spinlock _mtx;
@@ -198,7 +198,7 @@ class Mutex {
  public:
   Mutex() : _sem(1) {}
 
-  Coroutine<void> lock() { return this->_sem.aquire(); }
+  Coroutine<void> lock() { return _sem.aquire(); }
 
   void unlock() { _sem.release(); }
 
@@ -230,7 +230,7 @@ inline Coroutine<void> yield() { co_await _impl::SchedTarget::Yielder{}(); }
 
 inline size_t this_coroutine_id() { return _impl::SchedContext::this_coroutine_id(); }
 
-inline auto this_coroutine_ctx() -> const Context& { return _impl::SchedContext::this_coroutine_ctx(); }
+inline auto this_coroutine_ctx() -> Context& { return _impl::SchedContext::this_coroutine_ctx(); }
 
 inline auto this_coroutine_locals() -> std::vector<std::any>& { return _impl::SchedContext::this_coroutine_locals(); }
 

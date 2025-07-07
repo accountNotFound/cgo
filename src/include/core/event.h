@@ -129,7 +129,9 @@ class Socket {
     operator bool() const { return fd > 0; }
   };
 
-  Socket();
+  Socket() = default;
+
+  Socket(Context& ctx);
 
   std::expected<void, Error> bind(size_t port);
 
@@ -155,9 +157,10 @@ class Socket {
   operator int() const { return this->_fd; }
 
  private:
-  int _fd;
+  Context* _ctx = nullptr;
+  int _fd = -1;
 
-  Socket(int fd);
+  Socket(Context& ctx, int fd);
 };
 
 }  // namespace cgo

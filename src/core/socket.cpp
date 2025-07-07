@@ -19,7 +19,7 @@ using _impl::_event::Event;
  * @return True if event activated, or False if timeout
  */
 Coroutine<bool> wait_event(
-    int fd, Event on,
+    Context& ctx, int fd, Event on,
     std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1)) {
   if (timeout.count() < 0) {
     Semaphore sem(0);
@@ -39,7 +39,7 @@ Coroutine<bool> wait_event(
         s->sem.release();
       }
     });
-    _impl::_time::get_dispatcher().submit(
+    _impl::TimedContext::at(ctx).create_timeout(
         [s]() {
           int expected = 0;
           if (s->timeout.compare_exchange_weak(expected, -1)) {
@@ -54,9 +54,9 @@ Coroutine<bool> wait_event(
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
 
-Socket::Socket() : Socket(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) {}
+Socket::Socket(Context& ctx) : Socket(ctx, ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) {}
 
-Socket::Socket(int fd) : _fd(fd) {
+Socket::Socket(Context& ctx, int fd) : _ctx(&ctx), _fd(fd) {
   int flags = ::fcntl(this->_fd, F_GETFL) | O_NONBLOCK;
   if (::fcntl(this->_fd, F_SETFL, flags) < 0) {
     throw Socket::Error(this->_fd, ::strerror(errno));
@@ -92,12 +92,12 @@ Coroutine<std::expected<Socket, Socket::Error>> Socket::accept() {
   while (true) {
     int fd = ::accept(this->_fd, (::sockaddr*)&caddr, &sin_size);
     if (fd > 0) {
-      co_return Socket(fd);
+      co_return Socket(*this->_ctx, fd);
     }
     if (errno != EAGAIN) {
       co_return std::unexpected(Error(this->_fd, ::strerror(errno)));
     }
-    co_await wait_event(this->_fd, Event::IN | Event::ONESHOT);
+    co_await wait_event(*this->_ctx, this->_fd, Event::IN | Event::ONESHOT);
   }
 }
 
@@ -113,7 +113,7 @@ Coroutine<std::expected<void, Socket::Error>> Socket::connect(const std::string&
   if (errno != EINPROGRESS) {
     co_return std::unexpected(Error(this->_fd, ::strerror(errno)));
   }
-  if (!(co_await wait_event(this->_fd, Event::OUT | Event::ONESHOT, timeout))) {
+  if (!(co_await wait_event(*this->_ctx, this->_fd, Event::OUT | Event::ONESHOT, timeout))) {
     co_return std::unexpected(Error(this->_fd, "connect timeout"));
   }
 
@@ -142,7 +142,7 @@ Coroutine<std::expected<std::string, Socket::Error>> Socket::recv(size_t size,
     if (errno != EAGAIN) {
       co_return std::unexpected(Error(this->_fd, ::strerror(errno)));
     }
-    if (!(co_await wait_event(this->_fd, Event::IN | Event::ONESHOT, timeout))) {
+    if (!(co_await wait_event(*this->_ctx, this->_fd, Event::IN | Event::ONESHOT, timeout))) {
       co_return std::unexpected(Error(this->_fd, "recv timeout"));
     }
   }
@@ -162,7 +162,7 @@ Coroutine<std::expected<void, Socket::Error>> Socket::send(const std::string& da
     if (errno != EAGAIN) {
       co_return std::unexpected(Error(this->_fd, ::strerror(errno)));
     }
-    if (!(co_await wait_event(this->_fd, Event::OUT | Event::ONESHOT, timeout))) {
+    if (!(co_await wait_event(*this->_ctx, this->_fd, Event::OUT | Event::ONESHOT, timeout))) {
       co_return std::unexpected(Error(this->_fd, "recv timeout"));
     }
   }

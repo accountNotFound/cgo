@@ -8,69 +8,71 @@
 
 namespace cgo::_impl::_time {
 
-struct Delayed {
+struct Task {
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
   using Callback = std::function<void()>;
 
   Callback fn;
   TimePoint ex;
 
-  Delayed() : _id(-1), fn(nullptr), ex() {}
+  Task() : _id(-1), fn(nullptr), ex() {}
 
-  Delayed(int id, Callback&& fn, const TimePoint& ex) : _id(id), fn(std::forward<decltype(fn)>(fn)), ex(ex) {}
+  Task(int id, Callback&& fn, const TimePoint& ex) : _id(id), fn(std::forward<decltype(fn)>(fn)), ex(ex) {}
 
   operator bool() const { return this->_id >= 0; }
 
-  bool operator>(const Delayed& rhs) const { return this->ex > rhs.ex; }
+  bool operator>(const Task& rhs) const { return this->ex > rhs.ex; }
 
-  bool operator<(const Delayed& rhs) const { return this->ex < rhs.ex; }
+  bool operator<(const Task& rhs) const { return this->ex < rhs.ex; }
 
-  bool operator==(const Delayed& rhs) const { return this->ex == rhs.ex; }
+  bool operator==(const Task& rhs) const { return this->ex == rhs.ex; }
 
  private:
   int _id;
 };
 
-class DelayedQueue {
+class TimedQueue {
  public:
-  void push(Delayed&& timer);
+  void push(Task&& timer);
 
-  Delayed pop();
+  Task pop();
 
-  void regist(_impl::BaseLazySignal& signal) { this->_signal = &signal; }
+  void on_timeout(_impl::BaseLazySignal& signal) { this->_signal = &signal; }
 
- private:
  private:
   Spinlock _mtx;
-  std::priority_queue<Delayed, std::vector<Delayed>, std::greater<Delayed>> _pq_timer;
+  std::priority_queue<Task, std::vector<Task>, std::greater<Task>> _pq_timer;
   _impl::BaseLazySignal* _signal;
 };
 
-class DelayedDispatcher {
+}  // namespace cgo::_impl::_time
+
+namespace cgo::_impl {
+
+class TimedContext {
  public:
-  DelayedDispatcher(size_t n_partition) : _tid(0), _pq_timers(n_partition) {}
+  static auto at(Context& ctx) -> TimedContext&;
 
-  void submit(std::function<void()>&& fn, std::chrono::duration<double, std::milli> timeout);
+  TimedContext(size_t n_partition) : _timed_queues(n_partition) {}
 
-  Delayed dispatch(size_t p_index);
+  void create_timeout(std::function<void()>&& fn, std::chrono::duration<double, std::milli> timeout);
 
-  void regist(size_t p_index, _impl::BaseLazySignal& signal) { this->_pq_timers[p_index].regist(signal); }
+  void on_timeout(size_t pindex, BaseLazySignal& signal) { _timed_queues[pindex].on_timeout(signal); }
+
+  size_t run_timeout(size_t pindex, size_t batch_size);
 
  private:
-  std::atomic<int> _tid;
-  std::vector<DelayedQueue> _pq_timers;
+  std::atomic<size_t> _tid = 0;
+
+  std::vector<_impl::_time::TimedQueue> _timed_queues;
 };
 
-inline std::unique_ptr<DelayedDispatcher> g_dispatcher = nullptr;
-
-inline DelayedDispatcher& get_dispatcher() { return *g_dispatcher; }
-
-}  // namespace cgo::_impl::_time
+}  // namespace cgo::_impl
 
 namespace cgo {
 
-Channel<Nil> timeout(std::chrono::duration<double, std::milli> timeout);
+Channel<Nil> timeout(Context& ctx, std::chrono::duration<double, std::milli> timeout);
 
-Coroutine<void> sleep(std::chrono::duration<double, std::milli> timeout);
+Coroutine<void> sleep(Context& ctx, std::chrono::duration<double, std::milli> timeout);
 
 }  // namespace cgo

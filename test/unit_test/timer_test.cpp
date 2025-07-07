@@ -12,21 +12,22 @@ cgo::Mutex mtx;
 std::atomic<size_t> end_num = 0;
 
 cgo::Coroutine<void> foo(int fid, std::chrono::milliseconds wait_ms) {
+  auto& ctx = cgo::this_coroutine_ctx();
   auto begin = std::chrono::steady_clock::now();
   for (int i = 0; i < foo_loop; ++i) {
     int r = std::rand() % 3;
     switch (r) {
       case 0: {
-        co_await cgo::sleep(wait_ms);
+        co_await cgo::sleep(ctx, wait_ms);
         break;
       }
       case 1: {
-        co_await (cgo::timeout(wait_ms) >> cgo::Dropout{});
+        co_await (cgo::timeout(ctx, wait_ms) >> cgo::Dropout{});
         break;
       }
       case 2: {
         cgo::Select select;
-        select.on(1, cgo::collect(cgo::sleep(wait_ms))) >> cgo::Dropout{};
+        select.on(1, cgo::collect(ctx, cgo::sleep(ctx, wait_ms))) >> cgo::Dropout{};
         co_await select();
       }
     }
@@ -47,11 +48,12 @@ cgo::Coroutine<void> foo(int fid, std::chrono::milliseconds wait_ms) {
 TEST(timer, sleep) {
   auto begin = std::chrono::steady_clock::now();
 
-  cgo::start_context(exec_num);
+  cgo::Context ctx;
+  ctx.start(exec_num);
   for (int i = 0; i < foo_num; ++i) {
     int r = std::rand() % 100 + 1;
     auto ms = std::chrono::milliseconds(r);
-    cgo::spawn(foo(i, ms), "foo_" + std::to_string(i));
+    cgo::spawn(ctx, foo(i, ms));
   }
 
   auto prev_check_ts = std::chrono::steady_clock::now();
@@ -63,7 +65,7 @@ TEST(timer, sleep) {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  cgo::stop_context();
+  ctx.stop();
 
   auto end = std::chrono::steady_clock::now();
   auto time_cost = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
