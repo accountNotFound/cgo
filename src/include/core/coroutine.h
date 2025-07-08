@@ -6,6 +6,78 @@
 
 namespace cgo::_impl {
 
+template <typename T>
+class BaseLinked {
+ public:
+  auto prev() -> T* const
+    requires std::is_base_of_v<BaseLinked<T>, T>
+  {
+    return static_cast<T*>(_prev);
+  }
+
+  auto next() -> T* const
+    requires std::is_base_of_v<BaseLinked<T>, T>
+  {
+    return static_cast<T*>(_next);
+  }
+
+  void link_back(BaseLinked<T>* bx) {
+    auto old_next = _next;
+    this->_next = bx;
+    bx->_next = old_next;
+    bx->_prev = this;
+    if (old_next) {
+      old_next->_prev = bx;
+    }
+  }
+
+  void link_front(BaseLinked<T>* bx) {
+    auto old_prev = _prev;
+    this->_prev = bx;
+    bx->_prev = old_prev;
+    bx->_next = this;
+    if (old_prev) {
+      old_prev->_next = bx;
+    }
+  }
+
+  auto unlink_back() -> T*
+    requires std::is_base_of_v<BaseLinked<T>, T>
+  {
+    if (!_next) {
+      return nullptr;
+    }
+    auto x = _next;
+    auto new_next = x->_next;
+    this->_next = new_next;
+    if (new_next) {
+      new_next->_prev = this;
+    }
+    x->_prev = x->_next = nullptr;
+    return static_cast<T*>(x);
+  }
+
+  auto unlink_front() -> T*
+    requires std::is_base_of_v<BaseLinked<T>, T>
+  {
+    if (!_prev) {
+      return nullptr;
+    }
+    auto x = _prev;
+    auto new_prev = x->_prev;
+    this->_prev = new_prev;
+    if (new_prev) {
+      new_prev->_next = this;
+    }
+    x->_prev = x->_next = nullptr;
+    return static_cast<T*>(x);
+  }
+
+ private:
+  BaseLinked<T>* _prev = nullptr;
+  BaseLinked<T>* _next = nullptr;
+};
+
 class BaseFrame {
   friend class FrameOperator;
 
@@ -17,7 +89,8 @@ class BaseFrame {
   virtual ~BaseFrame() { _destroy(); }
 
  protected:
-  class BasePromise {
+  class BasePromise : private BaseLinked<BasePromise> {
+    friend class BaseLinked<BasePromise>;
     friend class BaseFrame;
     friend class FrameOperator;
 
@@ -39,8 +112,6 @@ class BaseFrame {
     auto _call_stack_pop() -> BasePromise*;
 
    private:
-    BasePromise* _caller = nullptr;
-    BasePromise* _callee = nullptr;
     BasePromise* _entry = nullptr;
     BasePromise* _current = nullptr;
   };

@@ -23,21 +23,18 @@ void BaseFrame::_destroy() {
 
 void BaseFrame::BasePromise::_call_stack_push(BaseFrame::BasePromise* callee) {
   auto caller = _entry->_current;
-  caller->_callee = callee;
-  callee->_caller = caller;
-  callee->_entry = caller->_entry;
-  callee->_entry->_current = callee;
+  caller->link_back(callee);
+  callee->_entry = _entry;
+  _entry->_current = callee;
 }
 
 auto BaseFrame::BasePromise::_call_stack_pop() -> BaseFrame::BasePromise* {
-  auto entry = _onwer->_promise->_entry;
-  auto current = entry->_current;
-  if (current->_caller) {
-    current->_caller->_callee = nullptr;
-    entry->_current = current->_caller;
-    return entry->_current;
+  auto current = _entry->_current;
+  auto next = current->prev();
+  if (next) {
+    next->unlink_back();
   }
-  return nullptr;
+  return _entry->_current = next;
 }
 
 void FrameOperator::_call_stack_create(BaseFrame& entry) {
@@ -51,7 +48,7 @@ void FrameOperator::_call_stack_destroy(BaseFrame& entry) {
   auto current = promise->_entry->_current;
   while (current) {
     auto handler = current->_onwer->_handler;
-    auto next = current->_caller;
+    auto next = current->prev();
     current->_onwer->_handler = nullptr;
     handler.destroy();
     current = next;

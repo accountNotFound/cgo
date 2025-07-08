@@ -22,7 +22,7 @@ cgo::Coroutine<int> bar(int n) {
       throw i;
     }
     res += i;
-    // printf("   bar\n");
+    // ::printff("   bar\n");
     co_await std::suspend_always{};
     suspend_cnt++;
   }
@@ -30,16 +30,16 @@ cgo::Coroutine<int> bar(int n) {
 }
 
 cgo::Coroutine<std::any> foo(int n) {
-  // printf("  foo\n");
+  // ::printff("  foo\n");
   int res = co_await bar(n);
   co_return std::make_any<std::string>("return from foo: " + std::to_string(res));
 }
 
 cgo::Coroutine<void> biz(int n) {
-  // printf(" biz\n");
+  // ::printff(" biz\n");
   std::any res = co_await foo(n);
   std::string s = std::any_cast<std::string>(std::move(res));
-  // printf("biz get: %s\n", s.data());
+  // ::printff("biz get: %s\n", s.data());
 }
 
 TEST(coroutine, suspend) {
@@ -47,7 +47,7 @@ TEST(coroutine, suspend) {
   auto f = biz(bar_throw_threshold);
   init(f);
   for (int i = 0; !done(f); i++) {
-    // printf("main\n");
+    // ::printff("main\n");
     resume(f);
     ASSERT(suspend_cnt == i, "suspend failed");
   }
@@ -66,7 +66,7 @@ TEST(coroutine, catch_exception) {
   auto f = biz(bar_throw_threshold * 2);
   init(f);
   for (int i = 0; !done(f); i++) {
-    // // printf("main\n");
+    // ::printff("main\n");
     if (i >= bar_throw_threshold) {
       ASSERT_RAISE(resume(f), int, "catch exception failed");
     } else {
