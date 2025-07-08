@@ -10,6 +10,8 @@ auto SchedContext::at(Context& ctx) -> SchedContext& { return *ctx._sched_ctx; }
 
 auto TimedContext::at(Context& ctx) -> TimedContext& { return *ctx._timed_ctx; }
 
+auto EventContext::at(Context& ctx) -> EventContext& { return *ctx._event_ctx; }
+
 }  // namespace cgo::_impl
 
 namespace cgo {
@@ -21,6 +23,7 @@ void Context::start(size_t n_worker) {
   }
   _sched_ctx = std::make_unique<_impl::SchedContext>(*this, n_worker);
   _timed_ctx = std::make_unique<_impl::TimedContext>(n_worker);
+  _event_ctx = std::make_unique<_impl::EventContext>(n_worker);
   for (int i = 0; i < n_worker; ++i) {
     _workers.emplace_back(&Context::_run, this, i);
   }
@@ -38,14 +41,17 @@ void Context::stop() {
   }
   _sched_ctx->clear();
 
+  _event_ctx = nullptr;
   _timed_ctx = nullptr;
   _sched_ctx = nullptr;
 }
 
 void Context::_run(size_t pindex) {
-  _impl::BaseLazySignal signal;
+  _impl::EventLazySignal signal(*this, pindex, /*nowait=*/true);
   _sched_ctx->on_scheduled(pindex, signal);
   _timed_ctx->on_timeout(pindex, signal);
+
+  auto last_handle_time = std::chrono::steady_clock::now();
   while (!_finished) {
     bool sched_flag = false;
     if (_sched_ctx->run_scheduled(pindex, 128) > 0) {
@@ -57,15 +63,15 @@ void Context::_run(size_t pindex) {
       timed_flag = true;
     }
 
-    if (sched_flag || timed_flag) {
-      continue;
-    }
+    auto now = std::chrono::steady_clock::now();
     auto next_sched_time = _timed_ctx->next_schedule_time(pindex);
-    if (auto now = std::chrono::steady_clock::now(); now >= next_sched_time) {
-      continue;
+    if (sched_flag || timed_flag || now >= next_sched_time) {
+      if (now - last_handle_time > std::chrono::milliseconds(1)) {
+        _event_ctx->run_handler(pindex, 128, std::chrono::milliseconds(0));
+      }
     } else {
       auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(next_sched_time - now);
-      signal.wait(std::min(timeout, std::chrono::milliseconds(50)));
+      _event_ctx->run_handler(pindex, 128, std::min(timeout, std::chrono::milliseconds(50)));
     }
   }
 }

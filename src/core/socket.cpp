@@ -13,7 +13,7 @@
 
 namespace cgo {
 
-using _impl::_event::Event;
+using _impl::Event;
 
 /**
  * @return True if event activated, or False if timeout
@@ -23,7 +23,7 @@ Coroutine<bool> wait_event(
     std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1)) {
   if (timeout.count() < 0) {
     Semaphore sem(0);
-    _impl::_event::get_dispatcher().mod(fd, on, [&sem](Event) { sem.release(); });
+    _impl::EventContext::at(ctx).mod(fd, on, [&sem](Event) { sem.release(); });
     co_await sem.aquire();
     co_return true;
   } else {
@@ -33,7 +33,7 @@ Coroutine<bool> wait_event(
     };
 
     auto s = std::make_shared<Signal>(0);
-    _impl::_event::get_dispatcher().mod(fd, on, [s](Event) {
+    _impl::EventContext::at(ctx).mod(fd, on, [s](Event) {
       int expected = 0;
       if (s->timeout.compare_exchange_weak(expected, 1)) {
         s->sem.release();
@@ -61,7 +61,7 @@ Socket::Socket(Context& ctx, int fd) : _ctx(&ctx), _fd(fd) {
   if (::fcntl(this->_fd, F_SETFL, flags) < 0) {
     throw Socket::Error(this->_fd, ::strerror(errno));
   }
-  _impl::_event::get_dispatcher().add(this->_fd, Event::ERR | Event::ONESHOT, [](_impl::_event::Event) {});
+  _impl::EventContext::at(ctx).add(this->_fd, Event::ERR | Event::ONESHOT, [](Event) {});
 }
 
 std::expected<void, Socket::Error> Socket::bind(size_t port) {
@@ -169,7 +169,7 @@ Coroutine<std::expected<void, Socket::Error>> Socket::send(const std::string& da
 }
 
 void Socket::close() {
-  _impl::_event::get_dispatcher().del(this->_fd);
+  _impl::EventContext::at(*_ctx).del(this->_fd);
   ::close(this->_fd);
 }
 
