@@ -41,6 +41,20 @@ class BaseLinked {
     }
   }
 
+  bool unlink_this() {
+    auto old_prev = _prev;
+    auto old_next = _next;
+    if (old_prev) {
+      old_prev->_next = old_next;
+    }
+    if (old_next) {
+      old_next->_prev = old_prev;
+    }
+    bool ok = _prev || _next;
+    _prev = _next = nullptr;
+    return ok;
+  }
+
   auto unlink_back() -> T*
     requires std::is_base_of_v<BaseLinked<T>, T>
   {
@@ -155,6 +169,8 @@ class BaseFrame {
   std::coroutine_handle<> _handler = nullptr;
   BasePromise* _promise = nullptr;
 
+  BaseFrame() = default;
+
   template <typename T>
   BaseFrame(std::coroutine_handle<T> h) : _handler(h), _promise(&h.promise()) {}
 
@@ -197,6 +213,8 @@ class Coroutine : public _impl::BaseFrame {
    public:
     Coroutine get_return_object() { return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this)); }
   };
+
+  Coroutine(nullptr_t) : _impl::BaseFrame() {}
 
   void* address() const { return _handler.address(); }
 

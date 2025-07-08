@@ -70,10 +70,18 @@ class SchedContext {
  private:
   class Condition;
 
-  struct Task {
+  struct BaseTask : public BaseLinked<BaseTask> {
    public:
     Context* const ctx;
     size_t const id;
+
+    BaseTask() : ctx(nullptr), id(-1) {};
+
+    BaseTask(Context* ctx, size_t id) : ctx(ctx), id(id) {}
+  };
+
+  struct Task : public BaseTask {
+   public:
     Coroutine<void> fn;
 
     bool yielded = false;
@@ -85,7 +93,7 @@ class SchedContext {
     size_t suspend_cnt = 0;
     size_t yield_cnt = 0;
 
-    Task(Context* ctx, size_t id, Coroutine<void>&& fn) : ctx(ctx), id(id), fn(std::move(fn)) {}
+    Task(Context* ctx, size_t id, Coroutine<void>&& fn) : BaseTask(ctx, id), fn(std::move(fn)) {}
   };
 
   class Allocator {
@@ -112,13 +120,16 @@ class SchedContext {
     friend class SchedContext;
 
    public:
+    Scheduler() { _runnable_head.link_back(&_runnable_tail); }
+
     void push(Allocator::Handler task);
 
     auto pop() -> Allocator::Handler;
 
    private:
     Spinlock _mtx;
-    std::queue<Allocator::Handler> _runnable_tasks;
+    BaseTask _runnable_head;
+    BaseTask _runnable_tail;
     BaseLazySignal* _signal = nullptr;
   };
 
@@ -126,22 +137,22 @@ class SchedContext {
     friend class SchedContext;
 
    public:
+    Condition() { _blocked_head.link_back(&_blocked_tail); }
+
     Coroutine<void> wait(std::unique_lock<Spinlock>& guard);
 
     void notify();
 
    private:
     Spinlock _mtx;
-    std::unordered_map<Context*, std::list<Allocator::Handler>> _blocked_tasks;
-    std::unordered_map<size_t, std::list<Allocator::Handler>::iterator> _index;
+    BaseTask _blocked_head;
+    BaseTask _blocked_tail;
 
-    void _schedule_from_this(std::list<Allocator::Handler>& blocked_queue);
+    void _schedule_from_this();
 
     void _suspend_to_this(Allocator::Handler task, Spinlock* waiting_mtx);
 
     void _remove(Task* task);
-
-    void _notify_inlock();
   };
 
   struct Yielder {

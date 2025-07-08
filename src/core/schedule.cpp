@@ -96,7 +96,7 @@ void SchedContext::Allocator::destroy(SchedContext::Allocator::Handler task) {
 
 void SchedContext::Scheduler::push(SchedContext::Allocator::Handler task) {
   std::unique_lock guard(_mtx);
-  _runnable_tasks.push(std::move(task));
+  _runnable_tail.link_front(task.get());
   if (_signal) {
     _signal->emit();
   }
@@ -104,12 +104,11 @@ void SchedContext::Scheduler::push(SchedContext::Allocator::Handler task) {
 
 auto SchedContext::Scheduler::pop() -> SchedContext::Allocator::Handler {
   std::unique_lock guard(_mtx);
-  if (_runnable_tasks.empty()) {
+  if (_runnable_head.next() == &_runnable_tail) {
     return nullptr;
   }
-  auto task = std::move(_runnable_tasks.front());
-  _runnable_tasks.pop();
-  return std::move(task);
+  auto task = _runnable_head.unlink_back();
+  return Allocator::Handler(static_cast<Task*>(task));
 }
 
 Coroutine<void> SchedContext::Condition::wait(std::unique_lock<Spinlock>& guard) {
@@ -123,66 +122,29 @@ Coroutine<void> SchedContext::Condition::wait(std::unique_lock<Spinlock>& guard)
 
 void SchedContext::Condition::notify() {
   std::unique_lock guard(_mtx);
-  _notify_inlock();
+  _schedule_from_this();
 }
 
-void SchedContext::Condition::_schedule_from_this(std::list<Allocator::Handler>& blocked_queue) {
-  if (blocked_queue.empty()) {
+void SchedContext::Condition::_schedule_from_this() {
+  if (_blocked_head.next() == &_blocked_tail) {
     return;
   }
-  auto task = std::move(blocked_queue.front());
-  blocked_queue.pop_front();
+  auto task = _blocked_head.unlink_back();
   auto ctx = task->ctx;
   auto id = task->id;
-  _index.erase(id);
-  SchedContext::at(*ctx)._scheduler(id).push(std::move(task));
+  SchedContext::at(*ctx)._scheduler(id).push(Allocator::Handler(static_cast<Task*>(task)));
 }
 
 void SchedContext::Condition::_suspend_to_this(Allocator::Handler task, Spinlock* waiting_mtx) {
-  auto& que = _blocked_tasks[task->ctx];
-  auto id = task->id;
-  _index[id] = que.emplace(que.end(), std::move(task));
+  _blocked_tail.link_front(task.get());
   _mtx.unlock();
   waiting_mtx->unlock();
 }
 
 void SchedContext::Condition::_remove(Task* task) {
   std::unique_lock guard(_mtx);
-  auto ctx = task->ctx;
-  auto id = task->id;
-  if (_index.contains(id)) {
-    _blocked_tasks[ctx].erase(_index[id]);
-    _index.erase(id);
-    _notify_inlock();
-  }
-}
-
-void SchedContext::Condition::_notify_inlock() {
-  // notify this context
-  if (SchedContext::_running_task) {
-    if (auto& que = _blocked_tasks[SchedContext::_running_task->ctx]; !que.empty()) {
-      _schedule_from_this(que);
-      return;
-    }
-  }
-
-  // choose a context randomly
-  int no_empty_cnt = 0;
-  for (auto& [_, que] : _blocked_tasks) {
-    if (!que.empty()) {
-      ++no_empty_cnt;
-    }
-  }
-  int i = 0;
-  for (auto& [_, que] : _blocked_tasks) {
-    if (que.empty()) {
-      continue;
-    }
-    ++i;
-    int r = std::rand() % no_empty_cnt;
-    if (r % no_empty_cnt == 0 || i == no_empty_cnt) {
-      _schedule_from_this(que);
-    }
+  if (task->unlink_this()) {
+    _schedule_from_this();
   }
 }
 
