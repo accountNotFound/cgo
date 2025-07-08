@@ -147,6 +147,7 @@ class SchedContext {
     Spinlock _mtx;
     BaseTask _blocked_head;
     BaseTask _blocked_tail;
+    Context* _scheduled_ctx = nullptr;
 
     void _schedule_from_this();
 

@@ -118,6 +118,7 @@ Coroutine<void> SchedContext::Condition::wait(std::unique_lock<Spinlock>& guard)
   auto mtx = current.waiting_mtx = guard.release();
   co_await std::suspend_always{};  // do schedule in caller by call _suspend_to_this()
   guard = std::unique_lock(*mtx);  // unlocked in caller
+  _scheduled_ctx = nullptr;
 }
 
 void SchedContext::Condition::notify() {
@@ -130,7 +131,7 @@ void SchedContext::Condition::_schedule_from_this() {
     return;
   }
   auto task = _blocked_head.unlink_back();
-  auto ctx = task->ctx;
+  auto ctx = _scheduled_ctx = task->ctx;
   auto id = task->id;
   SchedContext::at(*ctx)._scheduler(id).push(Allocator::Handler(static_cast<Task*>(task)));
 }
@@ -143,7 +144,8 @@ void SchedContext::Condition::_suspend_to_this(Allocator::Handler task, Spinlock
 
 void SchedContext::Condition::_remove(Task* task) {
   std::unique_lock guard(_mtx);
-  if (task->unlink_this()) {
+  task->unlink_this();
+  if (_scheduled_ctx == nullptr || _scheduled_ctx == task->ctx) {
     _schedule_from_this();
   }
 }
