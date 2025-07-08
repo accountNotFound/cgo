@@ -100,11 +100,31 @@ class SchedContext {
     friend class SchedContext;
 
    public:
-    struct NoopDeletor {
-      void operator()(void*) const {};
-    };
+    class Handler {
+     public:
+      Handler() = default;
 
-    using Handler = std::unique_ptr<Task, NoopDeletor>;
+      Handler(Task* task) : _task(task) {}
+
+      Handler(const Handler&) = delete;
+
+      Handler(Handler&& rhs) = default;
+
+      auto get() const -> Task* { return _task; }
+
+      auto operator->() const -> Task* { return _task; }
+
+      auto operator*() const -> Task& { return *_task; }
+
+      auto operator=(const Handler&) -> Handler& = delete;
+
+      auto operator=(Handler&&) -> Handler& = default;
+
+      operator bool() const { return _task; }
+
+     private:
+      Task* _task = nullptr;
+    };
 
     auto create(Context* ctx, size_t id, Coroutine<void>&& fn) -> Handler;
 
@@ -164,6 +184,7 @@ class SchedContext {
   };
 
   Context* _ctx;
+  std::atomic<size_t> _tid = 0;
   std::vector<Allocator> _task_allocators;
   std::vector<Scheduler> _task_schedulers;
   inline static thread_local Allocator::Handler _running_task = nullptr;

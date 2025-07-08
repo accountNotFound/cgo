@@ -45,7 +45,7 @@ void SchedContext::clear() {
 }
 
 void SchedContext::create_scheduled(Coroutine<void>&& fn) {
-  size_t id = reinterpret_cast<size_t>(fn.address());
+  size_t id = _tid.fetch_add(1);
   auto task = _allocator(id).create(_ctx, id, std::move(fn));
   _scheduler(id).push(std::move(task));
 }
@@ -96,7 +96,7 @@ void SchedContext::Allocator::destroy(SchedContext::Allocator::Handler task) {
 
 void SchedContext::Scheduler::push(SchedContext::Allocator::Handler task) {
   std::unique_lock guard(_mtx);
-  _runnable_tail.link_front(task.get());
+  _runnable_tail.link_front(&*task);
   if (_signal) {
     _signal->emit();
   }
@@ -137,7 +137,7 @@ void SchedContext::Condition::_schedule_from_this() {
 }
 
 void SchedContext::Condition::_suspend_to_this(Allocator::Handler task, Spinlock* waiting_mtx) {
-  _blocked_tail.link_front(task.get());
+  _blocked_tail.link_front(&*task);
   _mtx.unlock();
   waiting_mtx->unlock();
 }
