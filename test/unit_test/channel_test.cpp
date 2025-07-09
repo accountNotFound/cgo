@@ -44,7 +44,7 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
                [](decltype(r_res)& w_res, decltype(chan) chan, decltype(n_writer) n_writer) -> cgo::Coroutine<void> {
                  for (int i = 0; i < msg_num / n_writer; i++) {
                    int v = i;
-                   co_await (chan << v);
+                   co_await (chan << std::move(v));
                    // printf("{%d} send %d\n", cgo::this_coroutine_id(), v);
                  }
                  w_res.fetch_add(1);
@@ -64,9 +64,9 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
 
 // TEST(channel, w1r1b0) { channel_test(1, 1, 0); }
 
-// TEST(channel, w1r1b1) { channel_test(1, 1, 10); }
-
 // TEST(channel, w4r4b0) { channel_test(4, 4, 0); }
+
+// TEST(channel, w1r1b1) { channel_test(1, 1, 10); }
 
 // TEST(channel, w4r4b1) { channel_test(4, 4, 10); }
 
@@ -169,9 +169,7 @@ void multi_ctx_test(int buffer_size) {
     chans[i] = cgo::Channel<int>(buffer_size);
   }
 
-  std::atomic<int> r_res = 0, w_res = 0;
-
-  std::atomic<int> cnt = 0;
+  std::atomic<int> w_res = 0;
 
   std::vector<int> values(msg_num, -1);
 
@@ -180,17 +178,14 @@ void multi_ctx_test(int buffer_size) {
   ctx2.start(1);
 
   for (int i = 0; i < n_reader; ++i) {
-    cgo::spawn(ctx1,
-               [](decltype(chans[0])& chan, decltype(r_res)& r_res, decltype(cnt)& cnt,
-                  decltype(values)& values) -> cgo::Coroutine<void> {
-                 while (cnt.load() < msg_num) {
-                   int v;
-                   co_await (chan >> v);
-                   ASSERT(values[v] == -1, "");
-                   values[v] = v;
-                 }
-                 r_res.fetch_add(1);
-               }(chans[i], r_res, cnt, values));
+    cgo::spawn(ctx1, [](decltype(chans[0])& chan, decltype(values)& values) -> cgo::Coroutine<void> {
+      while (true) {
+        int v;
+        co_await (chan >> v);
+        ASSERT(values[v] == -1, "v=%d, values[v]=%d\n", v, values[v]);
+        values[v] = v;
+      }
+    }(chans[i], values));
   }
 
   cgo::spawn(ctx2, [](decltype(chans)& chans, decltype(w_res)& w_res) -> cgo::Coroutine<void> {
@@ -205,7 +200,7 @@ void multi_ctx_test(int buffer_size) {
     w_res.fetch_add(1);
   }(chans, w_res));
 
-  while (r_res < n_reader && w_res < 1) {
+  while (w_res < 1) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
   ctx1.stop();

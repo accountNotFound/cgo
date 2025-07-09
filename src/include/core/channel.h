@@ -1,121 +1,148 @@
 #pragma once
 
-#include <functional>
+#include <queue>
 
 #include "core/schedule.h"
 
-namespace cgo::_impl::_chan {
+namespace cgo::_impl {
 
-using MoveFn = void (*)(void*, void*);
+class BaseChannel;
 
-struct SelectReducer {
+class BaseMsg : public BaseLinked<BaseMsg> {
+  friend class BaseChannel;
+
  public:
-  Semaphore sem;
-  Spinlock mtx;
-  int key;
-  bool done;
+  enum class TransferStatus { Ok = 0, InvalidSrc, InvalidDst };
 
-  SelectReducer() : sem(0), key(-1), done(false) {}
+  // for one channel read write
+  struct Simplex {
+   public:
+    void* data = nullptr;
+    Semaphore* signal = nullptr;
+  };
 
-  void commit(int key);
-};
+  // for multiple channel selection
+  struct Multiplex {
+    friend class BaseMsg;
 
-class ChanEvent {
- public:
-  enum class MoveStatus { Ok, SrcInvalid, DstInvalid };
+   public:
+    static const int InvalidKey = -1;
 
-  ChanEvent(void* data, Semaphore* sem) : _data(data), _chan_sem(sem), _select_key(-1), _select_reduce(nullptr) {}
+    Multiplex() = default;
 
-  ChanEvent(void* data, int key, std::shared_ptr<SelectReducer> reducer)
-      : _data(data), _chan_sem(nullptr), _select_key(key), _select_reduce(reducer) {}
+    Multiplex(void* data, Spinlock* mtx, Semaphore* signal, int* key)
+        : _data(data), _mtx(mtx), _signal(signal), _key(key) {}
 
-  MoveStatus to(void* dst, MoveFn move_fn);
+   private:
+    void* _data;
+    Spinlock* _mtx;
+    Semaphore* _signal;
+    int* _key = nullptr;
 
-  MoveStatus from(void* src, MoveFn move_fn);
+    void _commit(int key);
+  };
 
-  MoveStatus to(ChanEvent& dst, MoveFn move_fn);
+  BaseMsg() = default;
 
-  MoveStatus from(ChanEvent& src, MoveFn move_fn) { return src.to(*this, move_fn); }
+  BaseMsg(Simplex* p) : _simplex(p) {}
 
- private:
-  void* _data;
-  Semaphore* _chan_sem;
-  int _select_key;
-  std::shared_ptr<SelectReducer> _select_reduce;
-};
+  BaseMsg(Multiplex* p, int key) : _multiplex(p), _case_key(key) {}
 
-class ChanEventMatcher {
- public:
-  void submit_sender(ChanEvent ev) { this->_senders.push(std::move(ev)); }
+  virtual ~BaseMsg() = default;
 
-  void submit_receiver(ChanEvent ev) { this->_receivers.push(std::move(ev)); }
+  auto send_to(void* dst) -> TransferStatus;
 
-  bool to(void* dst, MoveFn move_fn);
+  auto send_to(BaseMsg* dst) -> TransferStatus;
 
-  bool from(void* src, MoveFn move_fn);
+  auto recv_from(void* src) -> TransferStatus;
 
-  bool to(ChanEvent& dst, MoveFn move_fn);
+  auto recv_from(BaseMsg* src) -> TransferStatus { return src->send_to(this); }
 
-  bool from(ChanEvent& src, MoveFn move_fn);
+  void drop();
 
- private:
-  std::queue<ChanEvent> _senders, _receivers;
+ protected:
+  BaseChannel* _chan = nullptr;
+  Simplex* _simplex = nullptr;
+  Multiplex* _multiplex = nullptr;
+  int _case_key = Multiplex::InvalidKey;
+
+  virtual void _move(void* src, void* dst) {};
 };
 
 template <typename T>
-class Channel {
+class TypeMsg : public BaseMsg {
  public:
-  static void move(void* src, void* dst) { *static_cast<T*>(dst) = std::move(*static_cast<T*>(src)); }
+  TypeMsg() = default;
 
-  Channel(size_t capacity) : _capacity(capacity) {}
+  TypeMsg(Simplex* p) : BaseMsg(p) {}
 
-  bool recv_from(ChanEvent src, bool enable_async = true) {
-    std::unique_lock guard(this->_mtx);
-    if (this->_buffer.empty()) {
-      if (this->_matcher.from(src, Channel::move)) {
-        return true;
-      }
+  TypeMsg(Multiplex* p, int key) : BaseMsg(p, key) {}
+
+ private:
+  void _move(void* src, void* dst) override {
+    if (src && dst) {
+      *static_cast<T*>(dst) = std::move(*static_cast<T*>(src));
     }
-    // buffer not empty, so no waiting receiver
-    if (this->_buffer.size() < this->_capacity) {
-      if (T x; src.to(&x, Channel::move) == ChanEvent::MoveStatus::Ok) {
-        this->_buffer.push(std::move(x));
-        return true;
-      }
-    }
-    if (enable_async) {
-      this->_matcher.submit_sender(src);
-    }
-    return false;
   }
+};
 
-  bool send_to(ChanEvent dst, bool enable_async = true) {
-    std::unique_lock guard(this->_mtx);
-    if (this->_buffer.empty()) {
-      if (this->_matcher.to(dst, Channel::move)) {
-        return true;
-      }
-    } else if (dst.from(&this->_buffer.front(), Channel::move) == ChanEvent::MoveStatus::Ok) {
-      this->_buffer.pop();
-      if (T x; this->_matcher.to(&x, Channel::move)) {
-        this->_buffer.push(std::move(x));
-      }
-      return true;
-    }
-    if (enable_async) {
-      this->_matcher.submit_receiver(dst);
-    }
-    return false;
-  }
+class BaseChannel {
+  friend class BaseMsg;
+
+ public:
+  enum class TransferStatus { Ok = 0, InvalidSrc, InvalidDst, InvalidOneshot, Inprocess };
+
+  BaseChannel();
+
+  virtual ~BaseChannel() = default;
+
+  auto send_to(BaseMsg* dst, bool oneshot = false) -> TransferStatus;
+
+  auto recv_from(BaseMsg* src, bool oneshot = false) -> TransferStatus;
+
+ protected:
+  Spinlock _mtx;
+  BaseMsg _sender_head, _sender_tail;
+  BaseMsg _recver_head, _recver_tail;
+
+  virtual bool _buffer_send_to(BaseMsg* dst) = 0;
+
+  virtual bool _buffer_recv_from(BaseMsg* src) = 0;
+};
+
+template <typename T>
+class TypeChannel : public BaseChannel {
+ public:
+  TypeChannel(size_t capacity = 0) : _capacity(capacity) {}
 
  private:
   const size_t _capacity;
-  Spinlock _mtx;
   std::queue<T> _buffer;
-  ChanEventMatcher _matcher;
+
+  bool _buffer_send_to(BaseMsg* dst) override {
+    if (_buffer.empty()) {
+      return false;
+    }
+    if (dst->recv_from(&_buffer.front()) == BaseMsg::TransferStatus::Ok) {
+      _buffer.pop();
+      return true;
+    }
+    return false;
+  }
+
+  bool _buffer_recv_from(BaseMsg* src) override {
+    if (_buffer.size() == _capacity) {
+      return false;
+    }
+    if (T x; src->send_to(&x) == BaseMsg::TransferStatus::Ok) {
+      _buffer.push(std::move(x));
+      return true;
+    }
+    return false;
+  }
 };
 
-}  // namespace cgo::_impl::_chan
+}  // namespace cgo::_impl
 
 namespace cgo {
 
@@ -133,58 +160,69 @@ template <typename T>
 class Channel {
   friend class Select;
 
- private:
-  class Nowait {
-   public:
-    Nowait(_impl::_chan::Channel<T>& chan) : _chan(&chan) {}
+ public:
+  struct Nowait {
+    friend class Channel;
 
-    bool operator<<(T& x) {
-      Semaphore sem(0);
-      return this->_chan->recv_from(_impl::_chan::ChanEvent(&x, &sem), /*enable_async=*/false);
+   public:
+    bool operator<<(T& x) const {
+      _impl::BaseMsg::Simplex simplex{&x, nullptr};
+      _impl::TypeMsg<T> msg(&simplex);
+      if (_chan->recv_from(&msg, /*oneshot=*/true) == _impl::BaseChannel::TransferStatus::Ok) {
+        return true;
+      }
+      return false;
     }
 
-    bool operator<<(T&& x) {
-      Semaphore sem(0);
-      return this->_chan->recv_from(_impl::_chan::ChanEvent(&x, &sem), /*enable_async=*/false);
+    bool operator<<(T&& x) const {
+      T data = std::move(x);
+      return *this << data;
     }
 
    private:
-    _impl::_chan::Channel<T>* _chan;
+    _impl::TypeChannel<T>* _chan;
+
+    Nowait(_impl::TypeChannel<T>* chan) : _chan(chan) {}
   };
 
- public:
-  Channel(size_t capacity = 0) : _impl(std::make_shared<_impl::_chan::Channel<T>>(capacity)) {}
+  Channel(size_t capacity = 0) : _chan(std::make_shared<_impl::TypeChannel<T>>(capacity)) {}
 
   Coroutine<void> operator<<(T& x) {
-    T x_copy = x;
-    Semaphore sem(0);
-    this->_impl->recv_from(_impl::_chan::ChanEvent(&x_copy, &sem));
-    co_await sem.aquire();
+    Semaphore signal(0);
+    _impl::BaseMsg::Simplex simplex{&x, &signal};
+    _impl::TypeMsg<T> msg(&simplex);
+    auto guard = defer([&msg]() { msg.drop(); });
+    _chan->recv_from(&msg);
+    co_await signal.aquire();
   }
 
   Coroutine<void> operator<<(T&& x) {
-    Semaphore sem(0);
-    this->_impl->recv_from(_impl::_chan::ChanEvent(&x, &sem));
-    co_await sem.aquire();
+    T data = std::move(x);
+    co_await (*this << ((T&)(data)));
   }
 
   Coroutine<void> operator>>(T& x) {
-    Semaphore sem(0);
-    this->_impl->send_to(_impl::_chan::ChanEvent(&x, &sem));
-    co_await sem.aquire();
+    Semaphore signal(0);
+    _impl::BaseMsg::Simplex simplex{&x, &signal};
+    _impl::TypeMsg<T> msg(&simplex);
+    auto guard = defer([&msg]() { msg.drop(); });
+    _chan->send_to(&msg);
+    co_await signal.aquire();
   }
 
   Coroutine<void> operator>>(Dropout) {
-    Semaphore sem(0);
-    T x;
-    this->_impl->send_to(_impl::_chan::ChanEvent(&x, &sem));
-    co_await sem.aquire();
+    Semaphore signal(0);
+    _impl::BaseMsg::Simplex simplex{nullptr, &signal};
+    _impl::TypeMsg<T> msg(&simplex);
+    auto guard = defer([&msg]() { msg.drop(); });
+    _chan->send_to(&msg);
+    co_await signal.aquire();
   }
 
-  Nowait nowait() { return Nowait(*_impl); }
+  Nowait nowait() const { return Nowait(_chan.get()); }
 
  private:
-  std::shared_ptr<_impl::_chan::Channel<T>> _impl;
+  std::shared_ptr<_impl::TypeChannel<T>> _chan;
 };
 
 /**
@@ -204,72 +242,84 @@ class Select {
 
    public:
     void operator<<(T& x) {
-      this->_select->_invokers.emplace_back([x, chan = _chan, key = _key, reducer = _reducer]() {
-        chan->recv_from(_impl::_chan::ChanEvent(&x, key, reducer));
-      });
-      this->_select = nullptr;
+      auto listener = [&x, mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan, select = _select,
+                       key = _key]() {
+        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
+        msg = _impl::TypeMsg<T>(&mp, key);
+        select->_msgs.emplace_back(&msg);
+        chan->recv_from(&msg);
+      };
+      _select->_listeners.emplace_back(std::move(listener));
     }
 
     void operator<<(T&& x) {
-      this->_select->_invokers.emplace_back([x = std::move(x), chan = _chan, key = _key, reducer = _reducer]() {
-        chan->recv_from(_impl::_chan::ChanEvent(const_cast<T*>(&x), key, reducer));
-      });
-      this->_select = nullptr;
+      auto listener = [x, mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan, select = _select,
+                       key = _key]() mutable {
+        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
+        msg = _impl::TypeMsg<T>(&mp, key);
+        select->_msgs.emplace_back(&msg);
+        chan->recv_from(&msg);
+      };
+      _select->_listeners.emplace_back(std::move(listener));
     }
 
     void operator>>(T& x) {
-      this->_select->_invokers.emplace_back([&x, chan = _chan, key = _key, reducer = _reducer]() {
-        chan->send_to(_impl::_chan::ChanEvent(&x, key, reducer));
-      });
-      this->_select = nullptr;
+      auto listener = [&x, mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan, select = _select,
+                       key = _key]() mutable {
+        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
+        msg = _impl::TypeMsg<T>(&mp, key);
+        select->_msgs.emplace_back(&msg);
+        chan->send_to(&msg);
+      };
+      _select->_listeners.emplace_back(std::move(listener));
     }
 
     void operator>>(Dropout) {
-      this->_select->_invokers.emplace_back([chan = _chan, key = _key, reducer = _reducer]() {
-        T x;
-        chan->send_to(_impl::_chan::ChanEvent(&x, key, reducer));
-      });
-      this->_select = nullptr;
+      auto listener = [x = T(), mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan,
+                       select = _select, key = _key]() mutable {
+        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
+        msg = _impl::TypeMsg<T>(&mp, key);
+        select->_msgs.emplace_back(&msg);
+        chan->send_to(&msg);
+      };
+      _select->_listeners.emplace_back(std::move(listener));
     }
 
    private:
-    Select* _select;
-    _impl::_chan::Channel<T>* _chan;
-    int _key;
-    std::shared_ptr<_impl::_chan::SelectReducer> _reducer;
+    Case(Select* select, _impl::BaseChannel* chan, int key) : _select(select), _chan(chan), _key(key) {}
 
-    Case(Select& select, _impl::_chan::Channel<T>& chan, int key, std::shared_ptr<_impl::_chan::SelectReducer>& reducer)
-        : _select(&select), _chan(&chan), _key(key), _reducer(reducer) {}
+    Select* _select;
+    _impl::BaseChannel* _chan;
+    int _key;
   };
 
  public:
-  Select() : _reducer(std::make_shared<_impl::_chan::SelectReducer>()) {}
+  Select() = default;
 
   Select(const Select&) = delete;
+
+  Select(Select&&) = delete;
 
   /**
    * @param key: The unique key specifing certain channel event. Key should be >= 0
    */
   template <typename T>
-  Case<T> on(int key, Channel<T>& chan) {
-    return Case<T>(*this, *chan._impl, key, this->_reducer);
+  Case<T> on(int key, const Channel<T>& chan) {
+    return Case<T>(this, chan._chan.get(), key);
   }
 
-  template <typename T>
-  Case<T> on(int key, Channel<T>&& chan) {
-    this->_storages.push_back(chan._impl);
-    return Case<T>(*this, *chan._impl, key, this->_reducer);
-  }
-
-  void on_default(int key);
+  void on_default() { _enable_default = true; }
 
   Coroutine<int> operator()();
 
  private:
-  std::shared_ptr<_impl::_chan::SelectReducer> _reducer;
-  std::vector<std::function<void()>> _invokers;
-  std::vector<std::shared_ptr<void>> _storages;
+  _impl::Spinlock _mtx;
+  Semaphore _signal = {0};
+  int _key = _impl::BaseMsg::Multiplex::InvalidKey;
   bool _enable_default = false;
+
+  std::vector<_impl::BaseMsg*> _msgs;
+  std::vector<std::function<void()>> _listeners;
 };
 
 /**

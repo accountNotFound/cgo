@@ -2,154 +2,188 @@
 
 #include <random>
 
-namespace cgo::_impl::_chan {
+namespace cgo::_impl {
 
-void SelectReducer::commit(int key) {
-  this->key = key;
-  this->done = true;
-  this->sem.release();
+void BaseMsg::Multiplex::_commit(int key) {
+  *_key = key;
+  _signal->release();
 }
 
-ChanEvent::MoveStatus ChanEvent::to(void* dst, MoveFn move_fn) {
-  if (this->_select_reduce) {
-    std::unique_lock guard(this->_select_reduce->mtx);
-    if (this->_select_reduce->done) {
-      return MoveStatus::SrcInvalid;
+auto BaseMsg::recv_from(void* src) -> BaseMsg::TransferStatus {
+  auto dst = this;
+  if (dst->_multiplex) {
+    std::unique_lock guard(*dst->_multiplex->_mtx);
+    if (*dst->_multiplex->_key != Multiplex::InvalidKey) {
+      return TransferStatus::InvalidSrc;
     }
-    move_fn(this->_data, dst);
-    this->_select_reduce->commit(this->_select_key);
-    return MoveStatus::Ok;
+    _move(src, dst->_multiplex->_data);
+    dst->_multiplex->_commit(dst->_case_key);
+    return TransferStatus::Ok;
   } else {
-    move_fn(this->_data, dst);
-    this->_chan_sem->release();
-    return MoveStatus::Ok;
+    _move(src, dst->_simplex->data);
+    if (dst->_simplex->signal) {
+      dst->_simplex->signal->release();
+    }
+    return TransferStatus::Ok;
   }
 }
 
-ChanEvent::MoveStatus ChanEvent::from(void* src, MoveFn move_fn) {
-  if (this->_select_reduce) {
-    std::unique_lock guard(this->_select_reduce->mtx);
-    if (this->_select_reduce->done) {
-      return MoveStatus::DstInvalid;
+auto BaseMsg::send_to(void* dst) -> BaseMsg::TransferStatus {
+  auto src = this;
+  if (src->_multiplex) {
+    std::unique_lock guard(*src->_multiplex->_mtx);
+    if (*src->_multiplex->_key != Multiplex::InvalidKey) {
+      return TransferStatus::InvalidSrc;
     }
-    move_fn(src, this->_data);
-    this->_select_reduce->commit(this->_select_key);
-    return MoveStatus::Ok;
+    _move(src->_multiplex->_data, dst);
+    src->_multiplex->_commit(src->_case_key);
+    return TransferStatus::Ok;
   } else {
-    move_fn(src, this->_data);
-    this->_chan_sem->release();
-    return MoveStatus::Ok;
+    _move(src->_simplex->data, dst);
+    if (src->_simplex->signal) {
+      src->_simplex->signal->release();
+    }
+    return TransferStatus::Ok;
   }
 }
 
-ChanEvent::MoveStatus ChanEvent::to(ChanEvent& dst, MoveFn move_fn) {
-  if (this->_select_reduce && dst._select_reduce) {
-    auto* m1 = &this->_select_reduce->mtx;
-    auto* m2 = &dst._select_reduce->mtx;
+auto BaseMsg::send_to(BaseMsg* dst) -> BaseMsg::TransferStatus {
+  auto src = this;
+  if (src->_multiplex && dst->_multiplex) {
+    auto m1 = src->_multiplex->_mtx;
+    auto m2 = dst->_multiplex->_mtx;
     if (m1 == m2) {
       throw std::runtime_error("selector deadlock because waiting send and recv on the same channel");
     }
     if (reinterpret_cast<size_t>(m1) > reinterpret_cast<size_t>(m2)) {
       std::swap(m1, m2);
     }
-    std::unique_lock guard1(*m1);
-    std::unique_lock guard2(*m2);
-    if (this->_select_reduce->done) {
-      return MoveStatus::SrcInvalid;
-    } else if (dst._select_reduce->done) {
-      return MoveStatus::DstInvalid;
+    std::unique_lock guard1(*m1), guard2(*m2);
+    if (*src->_multiplex->_key != Multiplex::InvalidKey) {
+      return TransferStatus::InvalidSrc;
     }
-    move_fn(this->_data, dst._data);
-    this->_select_reduce->commit(this->_select_key);
-    dst._select_reduce->commit(dst._select_key);
-    return MoveStatus::Ok;
-  } else if (this->_select_reduce && !dst._select_reduce) {
-    auto res = this->to(dst._data, move_fn);
-    if (res == MoveStatus::Ok) {
-      dst._chan_sem->release();
+    if (*dst->_multiplex->_key != Multiplex::InvalidKey) {
+      return TransferStatus::InvalidDst;
+    }
+    _move(src->_multiplex->_data, dst->_multiplex->_data);
+    src->_multiplex->_commit(src->_case_key);
+    dst->_multiplex->_commit(dst->_case_key);
+    return TransferStatus::Ok;
+  } else if (src->_multiplex && dst->_simplex) {
+    auto res = src->send_to(dst->_simplex->data);
+    if (res == TransferStatus::Ok && dst->_simplex->signal) {
+      dst->_simplex->signal->release();
     }
     return res;
-  } else if (!this->_select_reduce && dst._select_reduce) {
-    auto res = dst.from(this->_data, move_fn);
-    if (res == MoveStatus::Ok) {
-      this->_chan_sem->release();
+  } else if (src->_simplex && dst->_multiplex) {
+    auto res = dst->recv_from(src->_simplex->data);
+    if (res == TransferStatus::Ok && src->_simplex->signal) {
+      src->_simplex->signal->release();
     }
     return res;
   } else {
-    auto res = dst.from(this->_data, move_fn);
-    if (res == MoveStatus::Ok) {
-      this->_chan_sem->release();
+    auto res = dst->recv_from(src->_simplex->data);
+    if (res == TransferStatus::Ok && src->_simplex->signal) {
+      src->_simplex->signal->release();
     }
     return res;
   }
 }
 
-template <typename T>
-bool matcher_to(std::queue<ChanEvent>& senders, T& dst, MoveFn move_fn) {
-  while (!senders.empty()) {
-    auto res = senders.front().to(dst, move_fn);
-    if (res == ChanEvent::MoveStatus::Ok) {
-      senders.pop();
-      return true;
-    } else if (res == ChanEvent::MoveStatus::SrcInvalid) {
-      senders.pop();
-      continue;
-    } else {
-      break;
-    }
-  }
-  return false;
+void BaseMsg::drop() {
+  std::unique_lock guard(_chan->_mtx);
+  unlink_this();
 }
 
-template <typename T>
-bool matcher_from(std::queue<ChanEvent>& receivers, T& src, MoveFn move_fn) {
-  while (!receivers.empty()) {
-    auto res = receivers.front().from(src, move_fn);
-    if (res == ChanEvent::MoveStatus::Ok) {
-      receivers.pop();
-      return true;
-    } else if (res == ChanEvent::MoveStatus::DstInvalid) {
-      receivers.pop();
-      continue;
-    } else {
-      break;
-    }
-  }
-  return false;
+BaseChannel::BaseChannel() {
+  _sender_head.link_back(&_sender_tail);
+  _recver_head.link_back(&_recver_tail);
 }
 
-bool ChanEventMatcher::to(void* dst, MoveFn move_fn) { return matcher_to(this->_senders, dst, move_fn); }
+auto BaseChannel::send_to(BaseMsg* dst, bool oneshot) -> TransferStatus {
+  std::unique_lock guard(_mtx);
+  dst->_chan = this;
+  if (_buffer_send_to(dst)) {
+    while (_sender_head.next() != &_sender_tail) {
+      auto sender = _sender_head.unlink_back();
+      if (_buffer_recv_from(sender)) {
+        break;
+      }
+    }
+    return TransferStatus::Ok;
+  }
+  while (_sender_head.next() != &_sender_tail) {
+    auto status = const_cast<BaseMsg*>(_sender_head.next())->send_to(dst);
+    if (status == BaseMsg::TransferStatus::Ok) {
+      _sender_head.unlink_back();
+      return TransferStatus::Ok;
+    } else if (status == BaseMsg::TransferStatus::InvalidSrc) {
+      _sender_head.unlink_back();
+      continue;
+    } else {
+      return TransferStatus::InvalidDst;
+    }
+  }
+  if (!oneshot) {
+    _recver_tail.link_front(dst);
+    return TransferStatus::Inprocess;
+  }
+  return TransferStatus::InvalidOneshot;
+}
 
-bool ChanEventMatcher::from(void* src, MoveFn move_fn) { return matcher_from(this->_receivers, src, move_fn); }
+auto BaseChannel::recv_from(BaseMsg* src, bool oneshot) -> TransferStatus {
+  std::unique_lock guard(_mtx);
+  src->_chan = this;
+  if (_buffer_recv_from(src)) {
+    while (_recver_head.next() != &_recver_tail) {
+      auto recver = _recver_head.unlink_back();
+      if (_buffer_send_to(recver)) {
+        break;
+      }
+    }
+    return TransferStatus::Ok;
+  }
+  while (_recver_head.next() != &_recver_tail) {
+    auto status = const_cast<BaseMsg*>(_recver_head.next())->recv_from(src);
+    if (status == BaseMsg::TransferStatus::Ok) {
+      _recver_head.unlink_back();
+      return TransferStatus::Ok;
+    } else if (status == BaseMsg::TransferStatus::InvalidDst) {
+      _recver_head.unlink_back();
+      continue;
+    } else {
+      return TransferStatus::InvalidSrc;
+    }
+  }
+  if (!oneshot) {
+    _sender_tail.link_front(src);
+    return TransferStatus::Inprocess;
+  }
+  return TransferStatus::InvalidOneshot;
+}
 
-bool ChanEventMatcher::to(ChanEvent& dst, MoveFn move_fn) { return matcher_to(this->_senders, dst, move_fn); }
-
-bool ChanEventMatcher::from(ChanEvent& src, MoveFn move_fn) { return matcher_from(this->_receivers, src, move_fn); }
-
-}  // namespace cgo::_impl::_chan
+}  // namespace cgo::_impl
 
 namespace cgo {
 
-void Select::on_default(int key) {
-  this->_enable_default = true;
-  this->_reducer->key = key;
-}
-
 Coroutine<int> Select::operator()() {
   std::minstd_rand rng;
-  std::shuffle(this->_invokers.begin(), this->_invokers.end(), rng);
-  for (auto& fn : this->_invokers) {
+  std::shuffle(_listeners.begin(), this->_listeners.end(), rng);
+  for (auto& fn : this->_listeners) {
     fn();
-    if (this->_reducer->done) {
+    std::unique_lock guard(_mtx);
+    if (_key != _impl::BaseMsg::Multiplex::InvalidKey) {
       break;
     }
   }
-  if (!this->_enable_default) {
-    co_await this->_reducer->sem.aquire();
+  if (!_enable_default) {
+    co_await _signal.aquire();
   }
-  std::unique_lock guard(this->_reducer->mtx);
-  this->_reducer->done = true;
-  co_return this->_reducer->key;
+  for (auto msg : _msgs) {
+    msg->drop();
+  }
+  std::unique_lock guard(_mtx);
+  co_return _key;
 }
 
 }  // namespace cgo
