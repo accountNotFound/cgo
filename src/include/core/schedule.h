@@ -42,7 +42,7 @@ class BaseLazySignal {
 };
 
 class SchedContext {
-  friend class SchedTarget;
+  friend class SchedController;
 
  public:
   static auto at(Context& ctx) -> SchedContext&;
@@ -195,7 +195,7 @@ class SchedContext {
   void _execute(Allocator::Handler task);
 };
 
-struct SchedTarget {
+struct SchedController {
  public:
   struct Yielder : public SchedContext::Yielder {};
 
@@ -222,7 +222,7 @@ class Semaphore {
 
  private:
   _impl::Spinlock _mtx;
-  _impl::SchedTarget::Condition _cond;
+  _impl::SchedController::Condition _cond;
   size_t _vacant;
 };
 
@@ -248,7 +248,7 @@ class DeferGuard {
 
   ~DeferGuard();
 
-  void drop() { this->_defer = nullptr; }
+  void drop() { _defer = nullptr; }
 
  private:
   std::function<void()> _defer = nullptr;
@@ -258,7 +258,7 @@ class DeferGuard {
   return DeferGuard(std::forward<std::function<void()>>(fn));
 }
 
-inline Coroutine<void> yield() { co_await _impl::SchedTarget::Yielder{}(); }
+inline Coroutine<void> yield() { co_await _impl::SchedController::Yielder{}(); }
 
 inline size_t this_coroutine_id() { return _impl::SchedContext::this_coroutine_id(); }
 

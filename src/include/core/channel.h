@@ -286,10 +286,10 @@ class Select {
     }
 
    private:
-    Case(Select* select, _impl::BaseChannel* chan, int key) : _select(select), _chan(chan), _key(key) {}
+    Case(Select* select, std::shared_ptr<_impl::BaseChannel> chan, int key) : _select(select), _chan(chan), _key(key) {}
 
     Select* _select;
-    _impl::BaseChannel* _chan;
+    std::shared_ptr<_impl::BaseChannel> _chan;
     int _key;
   };
 
@@ -305,7 +305,7 @@ class Select {
    */
   template <typename T>
   Case<T> on(int key, const Channel<T>& chan) {
-    return Case<T>(this, chan._chan.get(), key);
+    return Case<T>(this, chan._chan, key);
   }
 
   void on_default() { _enable_default = true; }
@@ -327,7 +327,7 @@ class Select {
  * @note Returned channel will contain `cgo::Nil{}` if `T=void`
  */
 template <typename T, typename V = std::conditional_t<std::is_void_v<T>, Nil, T>>
-Channel<V> collect(Context& ctx, Coroutine<T> fn) {
+auto collect(Context& ctx, Coroutine<T> fn) -> Channel<V> {
   Channel<V> chan(0);
   cgo::spawn(ctx, [](Coroutine<T> fn, Channel<V> chan) -> cgo::Coroutine<void> {
     if constexpr (std::is_void_v<T>) {

@@ -31,11 +31,11 @@ std::string format(const char* fmt, Args... args) {
 
 template <typename V, typename E>
 V get_or_raise(const std::expected<V, E>& ex) {
-  if (!ex.has_value()) {
+  if (!ex) {
     throw ex.error();
   }
   if constexpr (!std::is_void_v<V>) {
-    return std::move(ex.value());
+    return std::move(*ex);
   }
 }
 
@@ -49,7 +49,7 @@ cgo::Coroutine<bool> send_request(int cli, int data) {
     auto rsp = get_or_raise(co_await s.recv(256, timeout));
     co_return true;
   } catch (const cgo::Socket::Error& e) {
-    ::printf("{cli=%d, data=%d} request error: %s\n", cli, data, e.msg.data());
+    ::printf("{cli=%d, data=%d} request error: '%s'\n", cli, data, e.msg.data());
     co_return false;
   }
 }
@@ -61,7 +61,7 @@ cgo::Coroutine<void> handle_request(cgo::Socket conn) {
     auto req = get_or_raise(co_await conn.recv(256, timeout));
     get_or_raise(co_await conn.send(format("server echo: '%s'\n", req.data())));
   } catch (const cgo::Socket::Error& e) {
-    ::printf("server: {fd=%d} handle error: %s\n", int(conn), e.msg.data());
+    ::printf("server: {fd=%d} handle error: '%s'\n", int(conn), e.msg.data());
   }
 }
 
@@ -83,10 +83,11 @@ cgo::Coroutine<void> run_server() {
   sock.listen(back_log);
   while (!end_svr_flag) {
     auto conn = co_await sock.accept();
-    if (!conn.has_value()) {
+    if (!conn) {
+      ::printf("server: accept error: '%s'\n", conn.error().msg.data());
       continue;
     }
-    cgo::spawn(ctx, handle_request(conn.value()));
+    cgo::spawn(ctx, handle_request(*conn));
   }
 }
 
