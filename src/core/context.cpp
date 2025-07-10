@@ -21,12 +21,10 @@ void Context::start(size_t n_worker) {
     std::cerr << "try to start but context is stopped\n";
     std::exit(EXIT_FAILURE);
   }
+  _barrier = std::make_unique<std::barrier<>>(n_worker);
   _sched_ctx = std::make_unique<_impl::SchedContext>(*this, n_worker);
   _timed_ctx = std::make_unique<_impl::TimedContext>(n_worker);
   _event_ctx = std::make_unique<_impl::EventContext>(n_worker);
-  for (int i = 0; i < n_worker; ++i) {
-    _signals.emplace_back(std::make_unique<_impl::EventLazySignal>(*this, i, /*nowait=*/true));
-  }
   for (int i = 0; i < n_worker; ++i) {
     _workers.emplace_back(&Context::_run, this, i);
   }
@@ -45,8 +43,10 @@ void Context::stop() {
 }
 
 void Context::_run(size_t pindex) {
-  _sched_ctx->on_scheduled(pindex, *_signals[pindex]);
-  _timed_ctx->on_timeout(pindex, *_signals[pindex]);
+  _impl::EventLazySignal signal(*this, /*nowait=*/true);
+  _sched_ctx->on_scheduled(pindex, signal);
+  _timed_ctx->on_timeout(pindex, signal);
+  _barrier->arrive_and_wait();
 
   auto last_handle_time = std::chrono::steady_clock::now();
   while (!_finished) {
@@ -72,7 +72,8 @@ void Context::_run(size_t pindex) {
     }
   }
 
-  _signals[pindex]->close();
+  _barrier->arrive_and_wait();
+  signal.close();
   _sched_ctx->final_schedule(pindex);
 }
 
