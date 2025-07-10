@@ -28,6 +28,7 @@ class Context {
 
  private:
   std::vector<std::thread> _workers;
+  std::vector<std::unique_ptr<_impl::EventLazySignal>> _signals;
   std::unique_ptr<_impl::SchedContext> _sched_ctx = nullptr;
   std::unique_ptr<_impl::TimedContext> _timed_ctx = nullptr;
   std::unique_ptr<_impl::EventContext> _event_ctx = nullptr;

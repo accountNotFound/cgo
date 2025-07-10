@@ -31,17 +31,24 @@ void BaseLazySignal::wait(std::chrono::duration<double, std::milli> duration) {
   }
 }
 
-void SchedContext::clear() {
-  for (auto& allocator : _task_allocators) {
+SchedContext::~SchedContext() {}
+
+void SchedContext::final_schedule(size_t pindex) {
+  auto& scheduler = _scheduler(pindex);
+  {
+    std::unique_lock guard(scheduler._mtx);
+    scheduler._signal = nullptr;
+  }
+  auto& allocator = _allocator(pindex);
+  {
+    std::unique_lock guard(allocator._mtx);
     for (auto& task : allocator._pool) {
       if (task.waiting_cond) {
         task.waiting_cond->_remove(&task);
+        FrameOperator::destroy(task.fn);
       }
-      FrameOperator::destroy(task.fn);
     }
   }
-  _task_schedulers.clear();
-  _task_allocators.clear();
 }
 
 void SchedContext::create_scheduled(Coroutine<void>&& fn) {

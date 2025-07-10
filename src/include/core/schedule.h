@@ -56,9 +56,9 @@ class SchedContext {
   SchedContext(Context& ctx, size_t n_partition)
       : _ctx(&ctx), _task_allocators(n_partition), _task_schedulers(n_partition) {}
 
-  ~SchedContext() { clear(); }
+  ~SchedContext();
 
-  void clear();
+  void final_schedule(size_t pindex);
 
   void create_scheduled(Coroutine<void>&& fn);
 

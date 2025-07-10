@@ -25,6 +25,9 @@ void Context::start(size_t n_worker) {
   _timed_ctx = std::make_unique<_impl::TimedContext>(n_worker);
   _event_ctx = std::make_unique<_impl::EventContext>(n_worker);
   for (int i = 0; i < n_worker; ++i) {
+    _signals.emplace_back(std::make_unique<_impl::EventLazySignal>(*this, i, /*nowait=*/true));
+  }
+  for (int i = 0; i < n_worker; ++i) {
     _workers.emplace_back(&Context::_run, this, i);
   }
 }
@@ -39,17 +42,11 @@ void Context::stop() {
       worker.join();
     }
   }
-  _sched_ctx->clear();
-
-  _event_ctx = nullptr;
-  _timed_ctx = nullptr;
-  _sched_ctx = nullptr;
 }
 
 void Context::_run(size_t pindex) {
-  _impl::EventLazySignal signal(*this, pindex, /*nowait=*/true);
-  _sched_ctx->on_scheduled(pindex, signal);
-  _timed_ctx->on_timeout(pindex, signal);
+  _sched_ctx->on_scheduled(pindex, *_signals[pindex]);
+  _timed_ctx->on_timeout(pindex, *_signals[pindex]);
 
   auto last_handle_time = std::chrono::steady_clock::now();
   while (!_finished) {
@@ -74,6 +71,9 @@ void Context::_run(size_t pindex) {
       _event_ctx->run_handler(pindex, 128, std::min(timeout, std::chrono::milliseconds(50)));
     }
   }
+
+  _signals[pindex]->close();
+  _sched_ctx->final_schedule(pindex);
 }
 
 }  // namespace cgo
