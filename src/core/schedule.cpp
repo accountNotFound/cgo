@@ -1,185 +1,216 @@
 #include "core/schedule.h"
 
-namespace cgo {
+namespace cgo::_impl {
 
 void Spinlock::lock() {
   bool expected = false;
-  while (!this->_flag.compare_exchange_weak(expected, true)) {
+  while (!_locked.compare_exchange_weak(expected, true)) {
     expected = false;
   }
 }
 
-namespace _impl {
-
-void SignalBase::emit() {
-  if (this->_wait_flag && !this->_signal_flag) {
-    std::unique_lock guard(this->_mtx);
-    if (this->_wait_flag && !this->_signal_flag) {
-      this->_cond.notify_one();
-      this->_signal_flag = true;
+void BaseLazySignal::emit() {
+  if (_waited && !_emitted) {
+    std::unique_lock guard(_mtx);
+    if (_waited && !_emitted) {
+      _emit();
+      _emitted = true;
     }
   }
 }
 
-void SignalBase::wait(std::chrono::duration<double, std::milli> duration) {
-  if (!this->_signal_flag) {
-    std::unique_lock guard(this->_mtx);
-    if (!this->_signal_flag) {
-      this->_signal_flag = false;
-      this->_wait_flag = true;
-      this->_cond.wait_for(guard, duration);
-      this->_wait_flag = false;
+void BaseLazySignal::wait(std::chrono::duration<double, std::milli> duration) {
+  if (!_emitted) {
+    std::unique_lock guard(_mtx);
+    if (!_emitted) {
+      _emitted = false;
+      _waited = true;
+      _wait(guard, duration);
+      _waited = false;
     }
   }
 }
 
-}  // namespace _impl
+SchedContext::~SchedContext() {}
 
-namespace _impl::_sched {
-
-TaskHandler TaskAllocator::create(int id, Coroutine<void> fn, const std::string& name) {
-  Task* task;
+void SchedContext::final_schedule(size_t pindex) {
+  auto& scheduler = _scheduler(pindex);
   {
-    std::unique_lock guard(this->_mtx);
-    this->_index[id] = this->_pool.emplace(this->_pool.end(), id, std::move(fn), name);
-    task = &*this->_index[id];
-    task->create_at = std::chrono::steady_clock::now();
+    std::unique_lock guard(scheduler._mtx);
+    scheduler._signal = nullptr;
   }
-  _impl::_coro::init(task->fn);
-  return task;
-}
-
-void TaskAllocator::destroy(TaskHandler task) {
-  int id = task->id;
+  auto& allocator = _allocator(pindex);
   {
-    std::unique_lock guard(this->_mtx);
-    this->_pool.erase(this->_index.at(id));
-    this->_index.erase(id);
+    std::unique_lock guard(allocator._mtx);
+    for (auto& task : allocator._pool) {
+      if (task.waiting_cond) {
+        task.waiting_cond->_remove(&task);
+        FrameOperator::destroy(task.fn);
+      }
+    }
   }
 }
 
-void TaskQueue::push(TaskHandler task) {
-  std::unique_lock guard(this->_mtx);
-  this->_que.push(task);
-  if (this->_signal) {
-    this->_signal->emit();
-  }
+void SchedContext::create_scheduled(Coroutine<void>&& fn) {
+  size_t id = _tid.fetch_add(1);
+  auto task = _allocator(id).create(_ctx, id, std::move(fn));
+  _scheduler(id).push(std::move(task));
 }
 
-TaskHandler TaskQueue::pop() {
-  std::unique_lock guard(this->_mtx);
-  if (this->_que.empty()) {
-    return nullptr;
-  }
-  auto task = this->_que.front();
-  this->_que.pop();
-  return task;
-}
-
-Coroutine<void> TaskExecutor::yield_running_task() {
-  TaskExecutor::_yield_flag = true;
-  co_await std::suspend_always{};
-}
-
-Coroutine<void> TaskExecutor::suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& cond_lock) {
-  TaskExecutor::_suspend_q_waiting = &q_waiting;
-  auto mtx = TaskExecutor::_suspend_cond_lock = cond_lock.release();
-  co_await std::suspend_always{};
-  cond_lock = std::unique_lock(*mtx);
-}
-
-void TaskExecutor::execute(TaskHandler task) {
-  TaskExecutor::_t_running = task;
-
-  task->execute_cnt++;
-  while (!TaskExecutor::_yield_flag && !TaskExecutor::_suspend_q_waiting && !_impl::_coro::done(task->fn)) {
-    _impl::_coro::resume(task->fn);
-  }
-
-  if (TaskExecutor::_yield_flag) {
-    task->yield_cnt++;
-
-    get_dispatcher().submit(task);
-    TaskExecutor::_yield_flag = false;
-  } else if (TaskExecutor::_suspend_q_waiting) {
-    task->suspend_cnt++;
-
-    TaskExecutor::_suspend_q_waiting->push(task);
-    TaskExecutor::_suspend_cond_lock->unlock();
-    TaskExecutor::_suspend_q_waiting = nullptr;
-    TaskExecutor::_suspend_cond_lock = nullptr;
-  } else {
-    get_dispatcher().destroy(task);
-  }
-  TaskExecutor::_t_running = nullptr;
-}
-
-Coroutine<void> TaskCondition::wait(std::unique_lock<Spinlock>& lock) {
-  return TaskExecutor::suspend_running_task(this->_q_waiting, lock);
-}
-
-void TaskCondition::notify() {
-  if (auto next = this->_q_waiting.pop(); next) {
-    get_dispatcher().submit(next);
-  }
-}
-
-void TaskDispatcher::create(Coroutine<void> fn, const std::string& name) {
-  int id = this->_tid.fetch_add(1);
-  int slot = id % this->_t_allocs.size();
-  auto task = this->_t_allocs[slot].create(id, std::move(fn), name);
-  this->_q_runnables[slot].push(task);
-}
-
-void TaskDispatcher::destroy(TaskHandler task) {
-  int slot = task->id % this->_t_allocs.size();
-  this->_t_allocs[slot].destroy(task);
-}
-
-void TaskDispatcher::submit(TaskHandler task) {
-  int slot = task->id % this->_q_runnables.size();
-  this->_q_runnables[slot].push(task);
-}
-
-TaskHandler TaskDispatcher::dispatch(size_t p_index) {
-  TaskHandler task = nullptr;
-  for (int i = 0; !task && i < this->_q_runnables.size(); ++i) {
-    int slot = (p_index + i) % this->_q_runnables.size();
-    task = this->_q_runnables[slot].pop();
-  }
-  return task;
-}
-
-}  // namespace _impl::_sched
-
-Coroutine<void> Semaphore::aquire() {
-  std::unique_lock guard(this->_mtx);
-  while (true) {
-    if (this->_vacant > 0) {
-      this->_vacant--;
+size_t SchedContext::run_scheduled(size_t pindex, size_t batch_size) {
+  size_t cnt = 0;
+  for (; cnt < batch_size; ++cnt) {
+    if (auto task = _scheduler(pindex).pop(); task) {
+      _execute(std::move(task));
+    } else {
       break;
     }
-    co_await this->_cond.wait(guard);
+  }
+  if (cnt == batch_size) {
+    return cnt;
+  }
+  for (size_t i = 0; i < _task_schedulers.size(); ++i) {
+    if (auto task = _scheduler(pindex + i).pop(); task) {
+      _execute(std::move(task));
+      ++cnt;
+      if (cnt == batch_size) {
+        break;
+      }
+    }
+  }
+  return cnt;
+}
+
+auto SchedContext::Allocator::create(Context* ctx, size_t id, Coroutine<void>&& fn) -> Handler {
+  Task* task = nullptr;
+  {
+    std::unique_lock guard(_mtx);
+    _index[id] = _pool.emplace(_pool.end(), ctx, id, std::move(fn));
+    task = &*_index[id];
+  }
+  FrameOperator::init(task->fn);
+  return Handler(task);
+}
+
+void SchedContext::Allocator::destroy(SchedContext::Allocator::Handler task) {
+  size_t id = task->id;
+  {
+    std::unique_lock guard(_mtx);
+    _pool.erase(_index.at(id));
+    _index.erase(id);
+  }
+}
+
+void SchedContext::Scheduler::push(SchedContext::Allocator::Handler task) {
+  std::unique_lock guard(_mtx);
+  _runnable_tail.link_front(&*task);
+  if (_signal) {
+    _signal->emit();
+  }
+}
+
+auto SchedContext::Scheduler::pop() -> SchedContext::Allocator::Handler {
+  std::unique_lock guard(_mtx);
+  if (_runnable_head.next() == &_runnable_tail) {
+    return nullptr;
+  }
+  auto task = _runnable_head.unlink_back();
+  return Allocator::Handler(static_cast<Task*>(task));
+}
+
+Coroutine<void> SchedContext::Condition::wait(std::unique_lock<Spinlock>& guard) {
+  _mtx.lock();  // unlock in caller
+  auto& current = *SchedContext::_running_task;
+  current.waiting_cond = this;
+  auto mtx = current.waiting_mtx = guard.release();
+  co_await std::suspend_always{};  // do schedule in caller by call _suspend_to_this()
+  guard = std::unique_lock(*mtx);  // unlocked in caller
+  _scheduled_ctx = nullptr;
+}
+
+void SchedContext::Condition::notify() {
+  std::unique_lock guard(_mtx);
+  _schedule_from_this();
+}
+
+void SchedContext::Condition::_schedule_from_this() {
+  if (_blocked_head.next() == &_blocked_tail) {
+    return;
+  }
+  auto task = _blocked_head.unlink_back();
+  auto ctx = _scheduled_ctx = task->ctx;
+  auto id = task->id;
+  SchedContext::at(*ctx)._scheduler(id).push(Allocator::Handler(static_cast<Task*>(task)));
+}
+
+void SchedContext::Condition::_suspend_to_this(Allocator::Handler task, Spinlock* waiting_mtx) {
+  _blocked_tail.link_front(&*task);
+  _mtx.unlock();
+  waiting_mtx->unlock();
+}
+
+void SchedContext::Condition::_remove(Task* task) {
+  std::unique_lock guard(_mtx);
+  task->unlink_this();
+  if (_scheduled_ctx == nullptr || _scheduled_ctx == task->ctx) {
+    _schedule_from_this();
+  }
+}
+
+void SchedContext::_execute(SchedContext::Allocator::Handler task) {
+  auto& current = SchedContext::_running_task = std::move(task);
+  current->yielded = false;
+  current->waiting_cond = nullptr;
+  current->waiting_mtx = nullptr;
+
+  ++current->execute_cnt;
+  while (!current->yielded && !current->waiting_cond && !FrameOperator::done(current->fn)) {
+    FrameOperator::resume(current->fn);
+  }
+  if (FrameOperator::done(current->fn)) {
+    _allocator(current->id).destroy(std::move(current));
+  } else if (current->yielded) {
+    ++current->yield_cnt;
+    _scheduler(current->id).push(std::move(current));
+  } else {
+    ++current->suspend_cnt;
+    auto mtx = current->waiting_mtx;
+    current->waiting_cond->_suspend_to_this(std::move(current), mtx);
+  }
+}
+
+}  // namespace cgo::_impl
+
+namespace cgo {
+
+Coroutine<void> Semaphore::aquire() {
+  std::unique_lock guard(_mtx);
+  while (true) {
+    if (_vacant > 0) {
+      _vacant--;
+      break;
+    }
+    co_await _cond.wait(guard);
   }
 }
 
 void Semaphore::release() {
   {
-    std::unique_lock guard(this->_mtx);
-    this->_vacant++;
-    this->_cond.notify();
+    std::unique_lock guard(_mtx);
+    _vacant++;
+    _cond.notify();
   }
 }
 
 DeferGuard::DeferGuard(DeferGuard&& rhs) {
-  this->drop();
-  std::swap(this->_defer, rhs._defer);
+  drop();
+  std::swap(_defer, rhs._defer);
 }
 
 DeferGuard::~DeferGuard() {
-  if (this->_defer) {
-    this->_defer();
-    this->_defer = nullptr;
+  if (_defer) {
+    _defer();
+    _defer = nullptr;
   }
 }
 

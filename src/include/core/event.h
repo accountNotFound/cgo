@@ -5,7 +5,7 @@
 
 #include "core/schedule.h"
 
-namespace cgo::_impl::_event {
+namespace cgo::_impl {
 
 class Event {
  public:
@@ -36,81 +36,78 @@ class Event {
   size_t _events;
 };
 
-class EventHandler {
+class EventContext {
  public:
-  EventHandler();
-
-  ~EventHandler();
-
-  void add(int fd, Event ev, std::function<void(Event)>&& callback);
-
-  void mod(int fd, Event ev, std::function<void(Event)>&& callback);
-
-  void del(int fd);
-
-  size_t handle(size_t handle_batch = 128, size_t timeout_ms = 50);
-
- private:
-  struct Callback {
+  struct Handler {
     int fd;
     Event on;
     std::function<void(Event)> fn;
   };
 
-  Spinlock _mtx;
-  std::unordered_map<int, Callback> _m_calls;
-  std::unordered_map<int, int> _fd_cids;
-  std::atomic<int> _tid = 0;
-  int _fd = 0;
-};
+  class Dispatcher {
+   public:
+    Dispatcher();
 
-class EventDispatcher {
- public:
-  EventDispatcher(size_t n_partition) : _handlers(n_partition) {}
+    ~Dispatcher();
 
-  void add(int fd, Event ev, std::function<void(Event)>&& fn) {
-    this->_loc(fd).add(fd, ev, std::forward<decltype(fn)>(fn));
+    void add(int fd, Event ev, std::function<void(Event)>&& callback);
+
+    void mod(int fd, Event ev, std::function<void(Event)>&& callback);
+
+    void del(int fd);
+
+    size_t handle(size_t handle_batch = 128, size_t timeout_ms = 50);
+
+   private:
+    Spinlock _mtx;
+    std::unordered_map<int, Handler> _hid_calls;
+    std::unordered_map<int, int> _fd_hids;
+    std::atomic<int> _gid = 0;
+    int _fd = 0;
+  };
+
+  static auto at(Context& ctx) -> EventContext&;
+
+  EventContext(size_t n_partition) : _dispatchers(n_partition) {}
+
+  void add(int fd, Event ev, std::function<void(Event)>&& callback) {
+    handler(fd).add(fd, ev, std::forward<std::function<void(Event)>>(callback));
   }
 
-  void mod(int fd, Event ev, std::function<void(Event)>&& fn) {
-    this->_loc(fd).mod(fd, ev, std::forward<decltype(fn)>(fn));
+  void mod(int fd, Event ev, std::function<void(Event)>&& callback) {
+    handler(fd).mod(fd, ev, std::forward<std::function<void(Event)>>(callback));
   }
 
-  void del(int fd) { this->_loc(fd).del(fd); }
+  void del(int fd) { handler(fd).del(fd); }
 
-  size_t handle(size_t p_index, size_t batch_size, std::chrono::duration<double, std::milli> timeout) {
-    return this->_loc(p_index).handle(batch_size, timeout.count());
+  size_t run_handler(size_t pindex, size_t batch_size, std::chrono::duration<double, std::milli> timeout) {
+    return handler(pindex).handle(batch_size, timeout.count());
   }
+
+  auto handler(int i) -> Dispatcher& { return _dispatchers[i % _dispatchers.size()]; }
 
  private:
-  std::vector<EventHandler> _handlers;
-
-  EventHandler& _loc(int fd) { return this->_handlers[fd % this->_handlers.size()]; }
+  std::vector<Dispatcher> _dispatchers;
 };
 
-inline std::unique_ptr<EventDispatcher> g_dispatcher = nullptr;
-
-inline EventDispatcher& get_dispatcher() { return *g_dispatcher; }
-
-}  // namespace cgo::_impl::_event
-
-namespace cgo::_impl {
-
-class EventSignal : public SignalBase {
+class EventLazySignal : public BaseLazySignal {
  public:
-  EventSignal();
+  EventLazySignal(Context& ctx, size_t pindex, bool nowait = false);
 
   void close();
 
-  void emit() override;
-
-  void wait(std::chrono::duration<double, std::milli> timeout) override;
-
  private:
+  Context* _ctx;
+  size_t _pindex;
+  bool _nowait;
   int _fd;
-  int _event_flag = 0;
+  int _sig_data = 0;
 
-  void _callback(_event::Event ev);
+  void _emit() override;
+
+  void _wait(std::unique_lock<Spinlock>& guard, std::chrono::duration<double, std::milli> timeout) override;
+
+  void _callback(Event ev);
 };
 
 }  // namespace cgo::_impl
@@ -119,6 +116,8 @@ namespace cgo {
 
 /**
  * @brief Only support TCP/IPV4 now
+ *
+ * @note Default constructor will just return a null socket. You may always call `Socket::create()`
  */
 class Socket {
  public:
@@ -129,7 +128,9 @@ class Socket {
     operator bool() const { return fd > 0; }
   };
 
-  Socket();
+  static auto create(Context& ctx) -> Socket { return Socket(ctx); }
+
+  Socket() = default;
 
   std::expected<void, Error> bind(size_t port);
 
@@ -150,14 +151,19 @@ class Socket {
 
   void close();
 
-  int fd() const { return this->_fd; }
+  int fd() const { return _fd; }
 
-  operator int() const { return this->_fd; }
+  operator int() const { return _fd; }
+
+  operator bool() const { return bool(_ctx); }
 
  private:
-  int _fd;
+  Context* _ctx = nullptr;
+  int _fd = -1;
 
-  Socket(int fd);
+  Socket(Context& ctx);
+
+  Socket(Context& ctx, int fd);
 };
 
 }  // namespace cgo

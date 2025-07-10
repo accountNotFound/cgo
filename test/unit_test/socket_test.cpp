@@ -1,12 +1,12 @@
 #include "core/channel.h"
 #include "core/context.h"
 #include "core/event.h"
-#include "core/timer.h"
+#include "core/timed.h"
 #include "mtest.h"
 
 const size_t exec_num = 4;
 const size_t cli_num = 1000, conn_num = 100;
-std::atomic<size_t> end_cli_num = 0;
+std::atomic<size_t> end_conn_num = 0;
 bool end_svr_flag = false;
 
 const size_t port = 8080;
@@ -31,16 +31,16 @@ std::string format(const char* fmt, Args... args) {
 
 template <typename V, typename E>
 V get_or_raise(const std::expected<V, E>& ex) {
-  if (!ex.has_value()) {
+  if (!ex) {
     throw ex.error();
   }
   if constexpr (!std::is_void_v<V>) {
-    return std::move(ex.value());
+    return std::move(*ex);
   }
 }
 
 cgo::Coroutine<bool> send_request(int cli, int data) {
-  cgo::Socket s;
+  auto s = cgo::Socket::create(cgo::this_coroutine_ctx());
   auto guard = cgo::defer([&s]() { s.close(); });
   try {
     auto timeout = std::chrono::seconds(10);
@@ -49,7 +49,7 @@ cgo::Coroutine<bool> send_request(int cli, int data) {
     auto rsp = get_or_raise(co_await s.recv(256, timeout));
     co_return true;
   } catch (const cgo::Socket::Error& e) {
-    ::printf("{cli=%d, data=%d} request error: %s\n", cli, data, e.msg.data());
+    ::printf("{cli=%d, data=%d} request error: '%s'\n", cli, data, e.msg.data());
     co_return false;
   }
 }
@@ -61,7 +61,7 @@ cgo::Coroutine<void> handle_request(cgo::Socket conn) {
     auto req = get_or_raise(co_await conn.recv(256, timeout));
     get_or_raise(co_await conn.send(format("server echo: '%s'\n", req.data())));
   } catch (const cgo::Socket::Error& e) {
-    ::printf("server: {fd=%d} handle error: %s\n", int(conn), e.msg.data());
+    ::printf("server: {fd=%d} handle error: '%s'\n", int(conn), e.msg.data());
   }
 }
 
@@ -70,40 +70,46 @@ cgo::Coroutine<void> run_client(int cli) {
   while (i < conn_num) {
     bool ok = co_await send_request(cli, i);
     if (ok) {
+      end_conn_num.fetch_add(1);
       i++;
     }
   }
-  end_cli_num.fetch_add(1);
 }
 
 cgo::Coroutine<void> run_server() {
-  cgo::Socket sock;
+  auto& ctx = cgo::this_coroutine_ctx();
+  auto sock = cgo::Socket::create(ctx);
   sock.bind(port);
   sock.listen(back_log);
   while (!end_svr_flag) {
     auto conn = co_await sock.accept();
-    if (!conn.has_value()) {
+    if (!conn) {
+      ::printf("server: accept error: '%s'\n", conn.error().msg.data());
       continue;
     }
-    cgo::spawn(handle_request(conn.value()));
+    cgo::spawn(ctx, handle_request(*conn));
   }
 }
 
 TEST(socket, simple) {
-  cgo::start_context(exec_num);
-  cgo::spawn(run_server());
+  cgo::Context svr_ctx, cli_ctx;
+  svr_ctx.start(1);
+  cli_ctx.start(exec_num);
+
+  cgo::spawn(svr_ctx, run_server());
   for (int i = 0; i < cli_num; ++i) {
-    cgo::spawn(run_client(i));
+    cgo::spawn(cli_ctx, run_client(i));
   }
   auto prev_check_tp = std::chrono::steady_clock::now();
-  while (end_cli_num < cli_num) {
+  while (end_conn_num < cli_num * conn_num) {
     auto now = std::chrono::steady_clock::now();
     if (now - prev_check_tp > std::chrono::seconds(1)) {
-      ::printf("progress: %lu/%lu\n", end_cli_num.load(), cli_num);
+      ::printf("progress: %lu/%lu\n", end_conn_num.load(), cli_num * conn_num);
       prev_check_tp = now;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
   end_svr_flag = true;
-  cgo::stop_context();
+  cli_ctx.stop();
+  svr_ctx.stop();
 }

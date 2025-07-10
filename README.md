@@ -26,13 +26,19 @@ cgo::Coroutine<void> bar() {
   int timeout_ms = 1000;
 
   // do not use lambda capture. See notes in cppreference
-  cgo::spawn([](int timeout_ms) -> cgo::Coroutine<void> {
-    co_await cgo::sleep(std::chrono::milliseconds(timeout_ms));
-  }(timeout_ms));
+  cgo::spawn(
+    cgo::this_coroutine_ctx(), 
+    [](int timeout_ms) -> cgo::Coroutine<void> {
+      co_await cgo::sleep(cgo::this_coroutine_ctx(), std::chrono::milliseconds(timeout_ms));
+    }(timeout_ms));
 }
 
 void foo() {
-  cgo::spawn(bar());
+  cgo::Context ctx;
+  ctx.start(/*thread_num=*/1)
+  cgo::spawn(ctx, bar());
+  // ...
+  ctx.stop();
 }
 ```
 3. channel and select
@@ -41,10 +47,12 @@ cgo::Coroutine<void> select() {
   cgo::Channel<int> ichan;
   cgo::Channel<std::string> schan;
 
-  cgo::spawn([](cgo::Channel<std::string> chan) -> cgo::Coroutine<void> {
-    cgo::sleep(std::chrono::milliseconds(1000));
-    co_await (chan << "123");
-  }(schan));
+  cgo::spawn(
+    cgo::this_coroutine_ctx(), 
+    [](cgo::Channel<std::string> chan) -> cgo::Coroutine<void> {
+      cgo::sleep(cgo::this_coroutine_ctx(), std::chrono::milliseconds(1000));
+      co_await (chan << "123");
+    }(schan));
 
   {
     cgo::Select sel;
@@ -55,7 +63,7 @@ cgo::Coroutine<void> select() {
 
     sel.on(3, cgo::collect(cgo::sleep(std::chrono::milliseconds(5000)))) >> cgo::Dropout{}; // discard the value
 
-    sel.on_default(-1); // enable a default case
+    sel.on_default(); // enable a default case (-1)
 
     switch(co_await sel()) {
       case 1: {
@@ -69,7 +77,7 @@ cgo::Coroutine<void> select() {
         // nerver be here. Because this case is activated later (5 sec) than case 2 (1 sec)
       }
       default: {
-        // a.k.a the case -1: Because -1 is passed to `Select::on_default()`
+        // a.k.a the case -1. see `Select::on_default()`
         // go here immediately if `Select::on_default()` is called and no other case becomes activated
       }
     }
@@ -79,8 +87,8 @@ cgo::Coroutine<void> select() {
 4. async socket
 ```c++
 cgo::Coroutine<void> server() {
-  cgo::Socket server;
-  cgo::Defer defer([&server]() { server.close(); });
+  cgo::Socket server = cgo::Socket::create(cgo::this_coroutine_ctx());
+  cgo::DeferGuard guard = defer([&server]() { server.close(); });
 
   server.bind(8080);
   server.listen(1000);  
@@ -91,10 +99,11 @@ cgo::Coroutine<void> server() {
     cgo::Defer defer([&conn]() { conn.close(); });
 
     auto req = co_await conn.recv(256, /*timeout=*/std::chrono::milliseconds(5000));
-    if(!req.has_value()) {
+    if(!req) {
       // error process
+      std::string msg = req.error().msg;
     }
-    co_await conn.send("echo from server: " + req.value());
+    co_await conn.send("echo from server: " + *req);
   }(conn));
 
 }

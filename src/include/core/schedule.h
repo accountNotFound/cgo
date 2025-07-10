@@ -3,178 +3,234 @@
 #include <any>
 #include <atomic>
 #include <condition_variable>
-#include <functional>
 #include <list>
 #include <mutex>
-#include <queue>
 #include <unordered_map>
 #include <vector>
 
 #include "core/coroutine.h"
 
-namespace cgo {
+namespace cgo::_impl {
 
 class Spinlock {
  public:
   void lock();
 
-  void unlock() { this->_flag.store(false); }
+  void unlock() { _locked = false; }
 
  private:
-  std::atomic<bool> _flag = false;
+  std::atomic<bool> _locked = false;
 };
 
-namespace _impl {
-
-class SignalBase {
+class BaseLazySignal {
  public:
-  virtual void emit();
+  void emit();
 
-  virtual void wait(std::chrono::duration<double, std::milli> duration);
+  void wait(std::chrono::duration<double, std::milli> duration);
 
  protected:
   Spinlock _mtx;
   std::condition_variable_any _cond;
-  bool _signal_flag = false;
-  bool _wait_flag = false;
+  bool _emitted = false;
+  bool _waited = false;
+
+  virtual void _emit() { _cond.notify_one(); }
+
+  virtual void _wait(std::unique_lock<Spinlock>& guard, std::chrono::duration<double, std::milli> duration) {
+    _cond.wait_for(guard, duration);
+  }
 };
 
-}  // namespace _impl
+class SchedContext {
+  friend class SchedController;
 
-namespace _impl::_sched {
-
-struct Task {
-  const int id;
-  Coroutine<void> fn;
-  const std::string name;
-
-  std::vector<std::any> locals = {};
-  std::chrono::steady_clock::time_point create_at = {};
-  int execute_cnt = 0;
-  int yield_cnt = 0;
-  int suspend_cnt = 0;
-
-  Task(int id, Coroutine<void> fn, const std::string& name) : id(id), fn(std::move(fn)), name(name) {}
-};
-
-class TaskHandler {
  public:
-  TaskHandler() = default;
+  static auto at(Context& ctx) -> SchedContext&;
 
-  TaskHandler(Task* task) : _task(task) {}
+  static int this_coroutine_id() { return SchedContext::_running_task->id; }
 
-  Task& get() { return *this->_task; }
+  static auto this_coroutine_ctx() -> Context& { return *SchedContext::_running_task->ctx; }
 
-  operator bool() const { return this->_task; }
+  static auto& this_coroutine_locals() { return SchedContext::_running_task->locals; }
 
-  Task* operator->() const { return this->_task; }
+  SchedContext(Context& ctx, size_t n_partition)
+      : _ctx(&ctx), _task_allocators(n_partition), _task_schedulers(n_partition) {}
+
+  ~SchedContext();
+
+  void final_schedule(size_t pindex);
+
+  void create_scheduled(Coroutine<void>&& fn);
+
+  void on_scheduled(size_t pindex, BaseLazySignal& signal) { _scheduler(pindex)._signal = &signal; }
+
+  size_t run_scheduled(size_t pindex, size_t batch_size);
 
  private:
-  Task* _task = nullptr;
+  class Condition;
+
+  struct BaseTask : public BaseLinked<BaseTask> {
+   public:
+    Context* const ctx;
+    size_t const id;
+
+    BaseTask() : ctx(nullptr), id(-1) {};
+
+    BaseTask(Context* ctx, size_t id) : ctx(ctx), id(id) {}
+  };
+
+  struct Task : public BaseTask {
+   public:
+    Coroutine<void> fn;
+
+    bool yielded = false;
+    Condition* waiting_cond = nullptr;
+    Spinlock* waiting_mtx = nullptr;
+
+    std::vector<std::any> locals;
+    size_t execute_cnt = 0;
+    size_t suspend_cnt = 0;
+    size_t yield_cnt = 0;
+
+    Task(Context* ctx, size_t id, Coroutine<void>&& fn) : BaseTask(ctx, id), fn(std::move(fn)) {}
+  };
+
+  class Allocator {
+    friend class SchedContext;
+
+   public:
+    class Handler {
+     public:
+      Handler() = default;
+
+      Handler(Task* task) : _task(task) {}
+
+      Handler(const Handler&) = delete;
+
+      Handler(Handler&& rhs) = default;
+
+      auto get() const -> Task* { return _task; }
+
+      auto operator->() const -> Task* { return _task; }
+
+      auto operator*() const -> Task& { return *_task; }
+
+      auto operator=(const Handler&) -> Handler& = delete;
+
+      auto operator=(Handler&&) -> Handler& = default;
+
+      operator bool() const { return _task; }
+
+     private:
+      Task* _task = nullptr;
+    };
+
+    auto create(Context* ctx, size_t id, Coroutine<void>&& fn) -> Handler;
+
+    void destroy(Handler);
+
+   private:
+    Spinlock _mtx;
+    std::list<Task> _pool;
+    std::unordered_map<size_t, std::list<Task>::iterator> _index;
+  };
+
+  class Scheduler {
+    friend class SchedContext;
+
+   public:
+    Scheduler() { _runnable_head.link_back(&_runnable_tail); }
+
+    void push(Allocator::Handler task);
+
+    auto pop() -> Allocator::Handler;
+
+   private:
+    Spinlock _mtx;
+    BaseTask _runnable_head;
+    BaseTask _runnable_tail;
+    BaseLazySignal* _signal = nullptr;
+  };
+
+  class Condition {
+    friend class SchedContext;
+
+   public:
+    Condition() { _blocked_head.link_back(&_blocked_tail); }
+
+    Coroutine<void> wait(std::unique_lock<Spinlock>& guard);
+
+    void notify();
+
+   private:
+    Spinlock _mtx;
+    BaseTask _blocked_head;
+    BaseTask _blocked_tail;
+    Context* _scheduled_ctx = nullptr;
+
+    void _schedule_from_this();
+
+    void _suspend_to_this(Allocator::Handler task, Spinlock* waiting_mtx);
+
+    void _remove(Task* task);
+  };
+
+  struct Yielder {
+   public:
+    auto operator()() const -> std::suspend_always {
+      return (SchedContext::_running_task->yielded = true, std::suspend_always{});
+    }
+  };
+
+  Context* _ctx;
+  std::atomic<size_t> _tid = 0;
+  std::vector<Allocator> _task_allocators;
+  std::vector<Scheduler> _task_schedulers;
+  inline static thread_local Allocator::Handler _running_task = nullptr;
+
+  auto _allocator(size_t id) -> Allocator& { return _task_allocators[id % _task_allocators.size()]; }
+
+  auto _scheduler(size_t id) -> Scheduler& { return _task_schedulers[id % _task_schedulers.size()]; }
+
+  void _execute(Allocator::Handler task);
 };
 
-class TaskAllocator {
+struct SchedController {
  public:
-  TaskHandler create(int id, Coroutine<void> fn, const std::string& name = "");
+  struct Yielder : public SchedContext::Yielder {};
 
-  void destroy(TaskHandler task);
-
- private:
-  Spinlock _mtx;
-  std::unordered_map<int, std::list<Task>::iterator> _index;
-  std::list<Task> _pool;
+  class Condition : public SchedContext::Condition {};
 };
 
-class TaskQueue {
- public:
-  void push(TaskHandler task);
+}  // namespace cgo::_impl
 
-  TaskHandler pop();
-
-  void regist(_impl::SignalBase& signal) { this->_signal = &signal; }
-
- private:
-  Spinlock _mtx;
-  std::queue<TaskHandler> _que;
-  _impl::SignalBase* _signal = nullptr;
-};
-
-class TaskExecutor {
- public:
-  static TaskHandler& get_running_task() { return TaskExecutor::_t_running; }
-
-  static Coroutine<void> yield_running_task();
-
-  static Coroutine<void> suspend_running_task(TaskQueue& q_waiting, std::unique_lock<Spinlock>& cond_lock);
-
-  static void execute(TaskHandler task);
-
- private:
-  inline static thread_local TaskHandler _t_running = nullptr;
-  inline static thread_local TaskQueue* _suspend_q_waiting = nullptr;
-  inline static thread_local Spinlock* _suspend_cond_lock = nullptr;
-  inline static thread_local bool _yield_flag = false;
-};
-
-class TaskCondition {
- public:
-  Coroutine<void> wait(std::unique_lock<Spinlock>& lock);
-
-  void notify();
-
- private:
-  TaskQueue _q_waiting;
-};
-
-class TaskDispatcher {
- public:
-  TaskDispatcher(size_t n_partition) : _tid(0), _t_allocs(n_partition), _q_runnables(n_partition) {}
-
-  void create(Coroutine<void> fn, const std::string& name = "");
-
-  void destroy(TaskHandler task);
-
-  void submit(TaskHandler task);
-
-  TaskHandler dispatch(size_t p_index);
-
-  void regist(size_t p_index, SignalBase& signal) { this->_q_runnables[p_index].regist(signal); }
-
- private:
-  std::atomic<int> _tid;
-  std::vector<TaskAllocator> _t_allocs;
-  std::vector<TaskQueue> _q_runnables;
-};
-
-inline std::unique_ptr<TaskDispatcher> g_dispatcher = nullptr;
-
-inline TaskDispatcher& get_dispatcher() { return *g_dispatcher; }
-
-}  // namespace _impl::_sched
+namespace cgo {
 
 class Semaphore {
  public:
-  Semaphore(int vacant) : _vacant(vacant) {}
+  Semaphore(size_t vacant) : _vacant(vacant) {}
 
   Semaphore(const Semaphore&) = delete;
+
+  Semaphore(Semaphore&&) = delete;
 
   Coroutine<void> aquire();
 
   void release();
 
-  int count() { return this->_vacant; }
+  size_t count() { return _vacant; }
 
  private:
-  Spinlock _mtx;
-  _impl::_sched::TaskCondition _cond;
-  int _vacant;
+  _impl::Spinlock _mtx;
+  _impl::SchedController::Condition _cond;
+  size_t _vacant;
 };
 
 class Mutex {
  public:
   Mutex() : _sem(1) {}
 
-  Coroutine<void> lock() { return this->_sem.aquire(); }
+  Coroutine<void> lock() { return _sem.aquire(); }
 
   void unlock() { _sem.release(); }
 
@@ -192,7 +248,7 @@ class DeferGuard {
 
   ~DeferGuard();
 
-  void drop() { this->_defer = nullptr; }
+  void drop() { _defer = nullptr; }
 
  private:
   std::function<void()> _defer = nullptr;
@@ -202,14 +258,14 @@ class DeferGuard {
   return DeferGuard(std::forward<std::function<void()>>(fn));
 }
 
-inline void spawn(Coroutine<void> fn, const std::string& name = "") {
-  _impl::_sched::get_dispatcher().create(std::move(fn), name);
-}
+inline Coroutine<void> yield() { co_await _impl::SchedController::Yielder{}(); }
 
-inline Coroutine<void> yield() { return _impl::_sched::TaskExecutor::yield_running_task(); }
+inline size_t this_coroutine_id() { return _impl::SchedContext::this_coroutine_id(); }
 
-inline int this_coroutine_id() { return _impl::_sched::TaskExecutor::get_running_task()->id; }
+inline auto this_coroutine_ctx() -> Context& { return _impl::SchedContext::this_coroutine_ctx(); }
 
-inline auto& this_coroutine_locals() { return _impl::_sched::TaskExecutor::get_running_task()->locals; }
+inline auto this_coroutine_locals() -> std::vector<std::any>& { return _impl::SchedContext::this_coroutine_locals(); }
+
+inline void spawn(Context& ctx, Coroutine<void>&& fn) { _impl::SchedContext::at(ctx).create_scheduled(std::move(fn)); }
 
 }  // namespace cgo
