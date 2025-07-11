@@ -123,8 +123,8 @@ TEST(schedule, multi_ctx_force_stop) {
     res++;
     if (res >= stop_at) {
       done = true;
-      cgo::Semaphore sem(0);
-      co_await sem.aquire();
+      cgo::Semaphore signal(0);
+      co_await signal.aquire();
       // mutex will never be unlock until context is stopped (destroy the coroutine and call guard defer)
     }
   };

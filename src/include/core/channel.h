@@ -1,6 +1,7 @@
 #pragma once
 
 #include <queue>
+#include <variant>
 
 #include "core/schedule.h"
 
@@ -14,39 +15,20 @@ class BaseMsg : public BaseLinked<BaseMsg> {
  public:
   enum class TransferStatus { Ok = 0, InvalidSrc, InvalidDst };
 
-  // for one channel read write
   struct Simplex {
-   public:
-    void* data = nullptr;
-    Semaphore* signal = nullptr;
+    void* data;
+    Semaphore* signal;
   };
 
-  // for multiple channel selection
   struct Multiplex {
-    friend class BaseMsg;
-
-   public:
-    static const int InvalidKey = -1;
-
-    Multiplex() = default;
-
-    Multiplex(void* data, Spinlock* mtx, Semaphore* signal, int* key)
-        : _data(data), _mtx(mtx), _signal(signal), _key(key) {}
-
-   private:
-    void* _data;
-    Spinlock* _mtx;
-    Semaphore* _signal;
-    int* _key = nullptr;
-
-    void _commit(int key);
+    void* data;
+    void* select;
+    int case_key;
   };
 
   BaseMsg() = default;
 
-  BaseMsg(Simplex* p) : _simplex(p) {}
-
-  BaseMsg(Multiplex* p, int key) : _multiplex(p), _case_key(key) {}
+  BaseMsg(std::variant<Simplex, Multiplex> msg) : _msg(msg) {}
 
   virtual ~BaseMsg() = default;
 
@@ -61,10 +43,8 @@ class BaseMsg : public BaseLinked<BaseMsg> {
   void drop();
 
  protected:
+  std::variant<Simplex, Multiplex> _msg;
   BaseChannel* _chan = nullptr;
-  Simplex* _simplex = nullptr;
-  Multiplex* _multiplex = nullptr;
-  int _case_key = Multiplex::InvalidKey;
 
   virtual void _move(void* src, void* dst) {};
 };
@@ -74,9 +54,7 @@ class TypeMsg : public BaseMsg {
  public:
   TypeMsg() = default;
 
-  TypeMsg(Simplex* p) : BaseMsg(p) {}
-
-  TypeMsg(Multiplex* p, int key) : BaseMsg(p, key) {}
+  TypeMsg(std::variant<Simplex, Multiplex> msg) : BaseMsg(msg) {}
 
  private:
   void _move(void* src, void* dst) override {
@@ -167,7 +145,7 @@ class Channel {
    public:
     bool operator<<(T& x) const {
       _impl::BaseMsg::Simplex simplex{&x, nullptr};
-      _impl::TypeMsg<T> msg(&simplex);
+      _impl::TypeMsg<T> msg(simplex);
       if (_chan->recv_from(&msg, /*oneshot=*/true) == _impl::BaseChannel::TransferStatus::Ok) {
         return true;
       }
@@ -190,7 +168,7 @@ class Channel {
   Coroutine<void> operator<<(T& x) {
     Semaphore signal(0);
     _impl::BaseMsg::Simplex simplex{&x, &signal};
-    _impl::TypeMsg<T> msg(&simplex);
+    _impl::TypeMsg<T> msg(simplex);
     auto guard = defer([&msg]() { msg.drop(); });
     _chan->recv_from(&msg);
     co_await signal.aquire();
@@ -204,7 +182,7 @@ class Channel {
   Coroutine<void> operator>>(T& x) {
     Semaphore signal(0);
     _impl::BaseMsg::Simplex simplex{&x, &signal};
-    _impl::TypeMsg<T> msg(&simplex);
+    _impl::TypeMsg<T> msg(simplex);
     auto guard = defer([&msg]() { msg.drop(); });
     _chan->send_to(&msg);
     co_await signal.aquire();
@@ -213,7 +191,7 @@ class Channel {
   Coroutine<void> operator>>(Dropout) {
     Semaphore signal(0);
     _impl::BaseMsg::Simplex simplex{nullptr, &signal};
-    _impl::TypeMsg<T> msg(&simplex);
+    _impl::TypeMsg<T> msg(simplex);
     auto guard = defer([&msg]() { msg.drop(); });
     _chan->send_to(&msg);
     co_await signal.aquire();
@@ -235,17 +213,18 @@ class Channel {
  * @note Touch select object after `Select::operator()()` return is undefined behaviour
  */
 class Select {
- private:
+  friend class _impl::BaseMsg;
+
+ public:
   template <typename T>
   class Case {
     friend class Select;
 
    public:
     void operator<<(T& x) {
-      auto listener = [&x, mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan, select = _select,
-                       key = _key]() {
-        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
-        msg = _impl::TypeMsg<T>(&mp, key);
+      auto listener = [&x, msg = _impl::TypeMsg<T>(), chan = _chan, select = _select, key = _key]() mutable {
+        _impl::BaseMsg::Multiplex mp{&x, select, key};
+        msg = _impl::TypeMsg<T>(mp);
         select->_msgs.emplace_back(&msg);
         chan->recv_from(&msg);
       };
@@ -253,10 +232,9 @@ class Select {
     }
 
     void operator<<(T&& x) {
-      auto listener = [x, mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan, select = _select,
-                       key = _key]() mutable {
-        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
-        msg = _impl::TypeMsg<T>(&mp, key);
+      auto listener = [x, msg = _impl::TypeMsg<T>(), chan = _chan, select = _select, key = _key]() mutable {
+        _impl::BaseMsg::Multiplex mp{&x, select, key};
+        msg = _impl::TypeMsg<T>(mp);
         select->_msgs.emplace_back(&msg);
         chan->recv_from(&msg);
       };
@@ -264,10 +242,9 @@ class Select {
     }
 
     void operator>>(T& x) {
-      auto listener = [&x, mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan, select = _select,
-                       key = _key]() mutable {
-        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
-        msg = _impl::TypeMsg<T>(&mp, key);
+      auto listener = [&x, msg = _impl::TypeMsg<T>(), chan = _chan, select = _select, key = _key]() mutable {
+        _impl::BaseMsg::Multiplex mp{&x, select, key};
+        msg = _impl::TypeMsg<T>(mp);
         select->_msgs.emplace_back(&msg);
         chan->send_to(&msg);
       };
@@ -275,10 +252,9 @@ class Select {
     }
 
     void operator>>(Dropout) {
-      auto listener = [x = T(), mp = _impl::BaseMsg::Multiplex(), msg = _impl::TypeMsg<T>(), chan = _chan,
-                       select = _select, key = _key]() mutable {
-        mp = _impl::BaseMsg::Multiplex(&x, &select->_mtx, &select->_signal, &select->_key);
-        msg = _impl::TypeMsg<T>(&mp, key);
+      auto listener = [x = T(), msg = _impl::TypeMsg<T>(), chan = _chan, select = _select, key = _key]() mutable {
+        _impl::BaseMsg::Multiplex mp{&x, select, key};
+        msg = _impl::TypeMsg<T>(mp);
         select->_msgs.emplace_back(&msg);
         chan->send_to(&msg);
       };
@@ -293,7 +269,8 @@ class Select {
     int _key;
   };
 
- public:
+  struct Default {};
+
   Select() = default;
 
   Select(const Select&) = delete;
@@ -305,21 +282,30 @@ class Select {
    */
   template <typename T>
   Case<T> on(int key, const Channel<T>& chan) {
+    if (key == InvalidSelectKey) {
+      throw std::runtime_error("key not allowed");
+    }
     return Case<T>(this, chan._chan, key);
   }
 
-  void on_default() { _enable_default = true; }
+  void on(int key, Default);
 
   Coroutine<int> operator()();
 
  private:
+  static const int InvalidSelectKey = INT_MIN;
+
   _impl::Spinlock _mtx;
   Semaphore _signal = {0};
-  int _key = _impl::BaseMsg::Multiplex::InvalidKey;
-  bool _enable_default = false;
+  int _key = InvalidSelectKey;
+  int _default_key = InvalidSelectKey;
 
   std::vector<_impl::BaseMsg*> _msgs;
   std::vector<std::function<void()>> _listeners;
+
+  void _commit(int case_key);
+
+  void _drop();
 };
 
 /**

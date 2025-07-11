@@ -80,9 +80,9 @@ Channel<Nil> timeout(Context& ctx, std::chrono::duration<double, std::milli> tim
 }
 
 Coroutine<void> sleep(Context& ctx, std::chrono::duration<double, std::milli> timeout) {
-  Semaphore sem(0);
-  _impl::TimedContext::at(ctx).create_timeout([&sem]() { sem.release(); }, timeout);
-  co_await sem.aquire();
+  auto signal = std::make_shared<Semaphore>(0);
+  _impl::TimedContext::at(ctx).create_timeout([signal]() { signal->release(); }, timeout);
+  co_await signal->aquire();
 }
 
 }  // namespace cgo
