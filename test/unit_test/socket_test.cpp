@@ -59,7 +59,7 @@ cgo::Coroutine<void> handle_request(cgo::Socket conn) {
     auto req = get_or_raise(co_await conn.recv(256, timeout));
     get_or_raise(co_await conn.send(format("server echo: '%s'\n", req.data())));
   } catch (const cgo::Socket::Error& e) {
-    ::printf("server: {fd=%d} handle error: '%s'\n", int(conn), e.msg.data());
+    ::printf("server: {fd=%d} handle error: '%s'\n", int(conn), e.err_msg.data());
   }
 }
 
@@ -92,7 +92,7 @@ cgo::Coroutine<void> run_server(size_t port, bool& end_svr_flag) {
   while (!end_svr_flag) {
     auto conn = co_await sock.accept();
     if (!conn) {
-      ::printf("server: accept error: '%s'\n", conn.error().msg.data());
+      ::printf("server: accept error: '%s'\n", conn.error().err_msg.data());
       continue;
     }
     cgo::spawn(ctx, handle_request(*conn));

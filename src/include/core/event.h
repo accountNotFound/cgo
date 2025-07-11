@@ -123,7 +123,8 @@ class Socket {
  public:
   struct Error {
     int fd = -1;
-    std::string msg = "";
+    int err_code = 0;
+    std::string err_msg = "";
 
     operator bool() const { return fd > 0; }
   };
