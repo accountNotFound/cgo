@@ -21,24 +21,19 @@ using _impl::Event;
 Coroutine<bool> wait_event(
     Context& ctx, int fd, Event on,
     std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1)) {
-  if (timeout.count() < 0) {
-    Semaphore signal(0);
-    _impl::EventContext::at(ctx).mod(fd, on, [&signal](Event) { signal.release(); });
-    co_await signal.aquire();
-    co_return true;
-  } else {
-    struct Signal {
-      std::atomic<int> timeout = 0;
-      Semaphore signal = {0};
-    };
+  struct Signal {
+    std::atomic<int> timeout = 0;
+    Semaphore signal = {0};
+  };
 
-    auto s = std::make_shared<Signal>(0);
-    _impl::EventContext::at(ctx).mod(fd, on, [s](Event) {
-      int expected = 0;
-      if (s->timeout.compare_exchange_weak(expected, 1)) {
-        s->signal.release();
-      }
-    });
+  auto s = std::make_shared<Signal>(0);
+  _impl::EventContext::at(ctx).mod(fd, on, [s](Event) {
+    int expected = 0;
+    if (s->timeout.compare_exchange_weak(expected, 1)) {
+      s->signal.release();
+    }
+  });
+  if (timeout.count() > 0) {
     _impl::TimedContext::at(ctx).create_timeout(
         [s]() {
           int expected = 0;
@@ -47,9 +42,9 @@ Coroutine<bool> wait_event(
           }
         },
         timeout);
-    co_await s->signal.aquire();
-    co_return (s->timeout == 1);
   }
+  co_await s->signal.aquire();
+  co_return (s->timeout == 1);
 }
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
