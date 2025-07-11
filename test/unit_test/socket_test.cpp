@@ -38,7 +38,7 @@ V get_or_raise(const std::expected<V, E>& ex) {
 }
 
 cgo::Coroutine<bool> send_request(int cli, int data) {
-  auto s = cgo::Socket::create(cgo::this_coroutine_ctx());
+  auto s = cgo::Socket::create(cgo::this_coroutine_ctx(), cgo::Socket::Protocol::TCP, cgo::Socket::AddressFamily::IPv4);
   auto guard = cgo::defer([&s]() { s.close(); });
   try {
     auto timeout = std::chrono::seconds(10);
@@ -85,9 +85,9 @@ cgo::Coroutine<void> run_client(int cli, std::atomic<size_t>& end_conn_num) {
 
 cgo::Coroutine<void> run_server(size_t port, bool& end_svr_flag) {
   auto& ctx = cgo::this_coroutine_ctx();
-  auto sock = cgo::Socket::create(ctx);
+  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::TCP, cgo::Socket::AddressFamily::IPv4);
   auto guard = cgo::defer([&sock]() { sock.close(); });
-  sock.bind(port);
+  sock.bind("0.0.0.0", port);
   sock.listen(back_log);
   while (!end_svr_flag) {
     auto conn = co_await sock.accept();
@@ -114,7 +114,7 @@ TEST(socket, simple) {
   auto prev_check_tp = std::chrono::steady_clock::now();
   while (end_conn_num < cli_num * conn_num) {
     auto now = std::chrono::steady_clock::now();
-    if (now - prev_check_tp > std::chrono::milliseconds(200)) {
+    if (now - prev_check_tp > std::chrono::milliseconds(500)) {
       ::printf("progress: %lu/%lu\n", end_conn_num.load(), cli_num * conn_num);
       prev_check_tp = now;
     }
@@ -140,13 +140,13 @@ TEST(socket, ctx_stop) {
   auto prev_check_tp = std::chrono::steady_clock::now();
   while (end_conn_num < cli_num * conn_num / 2) {
     auto now = std::chrono::steady_clock::now();
-    if (now - prev_check_tp > std::chrono::milliseconds(200)) {
+    if (now - prev_check_tp > std::chrono::milliseconds(500)) {
       ::printf("progress: %lu/%lu\n", end_conn_num.load(), cli_num * conn_num);
       prev_check_tp = now;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
   svr_ctx.stop();
-  std::this_thread::sleep_for(std::chrono::seconds(3));
+  std::this_thread::sleep_for(std::chrono::seconds(2));
   cli_ctx.stop();
 }

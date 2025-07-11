@@ -121,6 +121,18 @@ namespace cgo {
  */
 class Socket {
  public:
+  enum class Protocol {
+    TCP,
+    UDP,
+    ICMP,  // not support now
+    SCTP   // not support now
+  };
+
+  enum class AddressFamily {
+    IPv4,
+    IPv6  // not support now
+  };
+
   struct Error {
     int fd = -1;
     int err_code = 0;
@@ -129,18 +141,20 @@ class Socket {
     operator bool() const { return fd > 0; }
   };
 
-  static auto create(Context& ctx) -> Socket { return Socket(ctx); }
+  static auto create(Context& ctx, Protocol protocol, AddressFamily family) -> Socket {
+    return Socket(ctx, protocol, family);
+  }
 
   Socket() = default;
 
-  std::expected<void, Error> bind(size_t port);
+  std::expected<void, Error> bind(const std::string& ip, uint16_t port);
 
   std::expected<void, Error> listen(size_t backlog = 1024);
 
   Coroutine<std::expected<Socket, Error>> accept();
 
   Coroutine<std::expected<void, Error>> connect(
-      const std::string& ip, size_t port,
+      const std::string& ip, uint16_t port,
       std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1));
 
   Coroutine<std::expected<std::string, Error>> recv(
@@ -149,6 +163,12 @@ class Socket {
   Coroutine<std::expected<void, Error>> send(
       const std::string& data,
       std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1));
+
+  Coroutine<std::expected<size_t, Error>> send_to(const std::string& data, const std::string& ip, uint16_t port,
+                                                  std::chrono::milliseconds timeout = std::chrono::milliseconds(-1));
+
+  Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>, Error>> recv_from(
+      size_t size, std::chrono::milliseconds timeout = std::chrono::milliseconds(-1));
 
   void close();
 
@@ -161,10 +181,12 @@ class Socket {
  private:
   Context* _ctx = nullptr;
   int _fd = -1;
+  Protocol _protocol;
+  AddressFamily _family;
 
-  Socket(Context& ctx);
+  Socket(Context& ctx, Protocol protocol, AddressFamily family);
 
-  Socket(Context& ctx, int fd);
+  Socket(Context& ctx, int fd, Protocol protocol, AddressFamily family);
 };
 
 }  // namespace cgo
