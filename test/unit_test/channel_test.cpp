@@ -161,7 +161,7 @@ TEST(channel, select_w2r5b0) { select_test(2, 5, 0); }
 
 TEST(channel, select_w5r2b1) { select_test(5, 2, 5); }
 
-void multi_ctx_test(int buffer_size) {
+void multi_ctx_nowait_test(int buffer_size) {
   const size_t n_reader = 4;
 
   std::array<cgo::Channel<int>, n_reader> chans;
@@ -190,11 +190,27 @@ void multi_ctx_test(int buffer_size) {
 
   cgo::spawn(ctx2, [](decltype(chans)& chans, decltype(w_res)& w_res) -> cgo::Coroutine<void> {
     for (int i = 0; i < msg_num;) {
+      bool use_nowait = std::rand() % 2;
       int r = std::rand() % n_reader;
-      if (chans[r].nowait() << i) {
-        ++i;
+      if (use_nowait) {
+        if (chans[r].nowait() << i) {
+          ++i;
+        } else {
+          co_await cgo::yield();
+        }
       } else {
-        co_await cgo::yield();
+        cgo::Select select;
+        select.on(1, chans[r]) << i;
+        select.on(-1, cgo::Select::Default{});
+        switch (co_await select()) {
+          case 1: {
+            ++i;
+            break;
+          }
+          default: {
+            co_await cgo::yield();
+          }
+        }
       }
     }
     w_res.fetch_add(1);
@@ -211,22 +227,28 @@ void multi_ctx_test(int buffer_size) {
   }
 }
 
-TEST(channel, multi_ctx_b0) { multi_ctx_test(0); }
+TEST(channel, multi_ctx_nowait_b0) { multi_ctx_nowait_test(0); }
 
-// TEST(channel, multi_ctx_b2) { multi_ctx_test(2); }
+// TEST(channel, multi_ctx_nowait_b2) { multi_ctx_test(2); }
 
-TEST(channel, multi_ctx_b8) { multi_ctx_test(8); }
+TEST(channel, multi_ctx_nowait_b8) { multi_ctx_nowait_test(8); }
 
 void multi_ctx_stop_test(size_t buffer_size) {
-  cgo::Channel<int> chan(buffer_size);
+  cgo::Channel<int> chans[3];
+  for (int i = 0; i < 3; ++i) {
+    chans[i] = cgo::Channel<int>(buffer_size);
+  }
 
   cgo::Context ctx1;
   ctx1.start(exec_num);
   for (int i = 0; i < msg_num; ++i) {
-    cgo::spawn(ctx1, [](decltype(chan) chan, int i) -> cgo::Coroutine<void> {
-      co_await (chan << i);
-      co_return;
-    }(chan, i));
+    cgo::spawn(ctx1, [](decltype(chans)& chans, int i) -> cgo::Coroutine<void> {
+      cgo::Select select;
+      select.on(0, chans[0]) << i;
+      select.on(1, chans[1]) << i;
+      select.on(2, chans[2]) << i;
+      co_await select();
+    }(chans, i));
   }
 
   std::thread th([&ctx1]() {
@@ -239,11 +261,15 @@ void multi_ctx_stop_test(size_t buffer_size) {
   cgo::Context ctx2;
   ctx2.start(exec_num);
   for (int i = 0; i < msg_num; ++i) {
-    cgo::spawn(ctx2, [](decltype(chan) chan, decltype(res)& res) -> cgo::Coroutine<void> {
+    cgo::spawn(ctx2, [](decltype(chans)& chans, decltype(res)& res) -> cgo::Coroutine<void> {
+      cgo::Select select;
       int v;
-      co_await (chan >> v);
+      select.on(0, chans[0]) >> v;
+      select.on(0, chans[0]) >> v;
+      select.on(0, chans[0]) >> v;
+      co_await select();
       res.fetch_add(1);
-    }(chan, res));
+    }(chans, res));
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   ctx2.stop();

@@ -4,54 +4,56 @@
 
 namespace cgo::_impl {
 
-void BaseMsg::Multiplex::_commit(int key) {
-  *_key = key;
-  _signal->release();
-}
-
 auto BaseMsg::recv_from(void* src) -> BaseMsg::TransferStatus {
-  auto dst = this;
-  if (dst->_multiplex) {
-    std::unique_lock guard(*dst->_multiplex->_mtx);
-    if (*dst->_multiplex->_key != Multiplex::InvalidKey) {
+  if (std::holds_alternative<Multiplex>(this->_msg)) {
+    auto& dst_msg = std::get<Multiplex>(this->_msg);
+    auto& dst_select = *static_cast<Select*>(dst_msg.select);
+    std::unique_lock guard(dst_select._mtx);
+    if (dst_select._key != Select::InvalidSelectKey) {
       return TransferStatus::InvalidSrc;
     }
-    _move(src, dst->_multiplex->_data);
-    dst->_multiplex->_commit(dst->_case_key);
+    _move(src, dst_msg.data);
+    dst_select._commit(dst_msg.case_key);
     return TransferStatus::Ok;
   } else {
-    _move(src, dst->_simplex->data);
-    if (dst->_simplex->signal) {
-      dst->_simplex->signal->release();
+    auto& dst_msg = std::get<Simplex>(this->_msg);
+    _move(src, dst_msg.data);
+    if (dst_msg.signal) {
+      dst_msg.signal->release();
     }
     return TransferStatus::Ok;
   }
 }
 
 auto BaseMsg::send_to(void* dst) -> BaseMsg::TransferStatus {
-  auto src = this;
-  if (src->_multiplex) {
-    std::unique_lock guard(*src->_multiplex->_mtx);
-    if (*src->_multiplex->_key != Multiplex::InvalidKey) {
+  if (std::holds_alternative<Multiplex>(this->_msg)) {
+    auto& src_msg = std::get<Multiplex>(this->_msg);
+    auto& src_select = *static_cast<Select*>(src_msg.select);
+    std::unique_lock guard(src_select._mtx);
+    if (src_select._key != Select::InvalidSelectKey) {
       return TransferStatus::InvalidSrc;
     }
-    _move(src->_multiplex->_data, dst);
-    src->_multiplex->_commit(src->_case_key);
+    _move(src_msg.data, dst);
+    src_select._commit(src_msg.case_key);
     return TransferStatus::Ok;
   } else {
-    _move(src->_simplex->data, dst);
-    if (src->_simplex->signal) {
-      src->_simplex->signal->release();
+    auto& src_msg = std::get<Simplex>(this->_msg);
+    _move(src_msg.data, dst);
+    if (src_msg.signal) {
+      src_msg.signal->release();
     }
     return TransferStatus::Ok;
   }
 }
 
 auto BaseMsg::send_to(BaseMsg* dst) -> BaseMsg::TransferStatus {
-  auto src = this;
-  if (src->_multiplex && dst->_multiplex) {
-    auto m1 = src->_multiplex->_mtx;
-    auto m2 = dst->_multiplex->_mtx;
+  if (std::holds_alternative<Multiplex>(this->_msg) && std::holds_alternative<Multiplex>(dst->_msg)) {
+    auto& src_msg = std::get<Multiplex>(this->_msg);
+    auto& dst_msg = std::get<Multiplex>(dst->_msg);
+    auto& src_select = *static_cast<Select*>(src_msg.select);
+    auto& dst_select = *static_cast<Select*>(dst_msg.select);
+    auto m1 = &src_select._mtx;
+    auto m2 = &dst_select._mtx;
     if (m1 == m2) {
       throw std::runtime_error("selector deadlock because waiting send and recv on the same channel");
     }
@@ -59,32 +61,35 @@ auto BaseMsg::send_to(BaseMsg* dst) -> BaseMsg::TransferStatus {
       std::swap(m1, m2);
     }
     std::unique_lock guard1(*m1), guard2(*m2);
-    if (*src->_multiplex->_key != Multiplex::InvalidKey) {
+    if (src_select._key != Select::InvalidSelectKey) {
       return TransferStatus::InvalidSrc;
     }
-    if (*dst->_multiplex->_key != Multiplex::InvalidKey) {
+    if (dst_select._key != Select::InvalidSelectKey) {
       return TransferStatus::InvalidDst;
     }
-    _move(src->_multiplex->_data, dst->_multiplex->_data);
-    src->_multiplex->_commit(src->_case_key);
-    dst->_multiplex->_commit(dst->_case_key);
+    _move(src_msg.data, dst_msg.data);
+    src_select._commit(src_msg.case_key);
+    dst_select._commit(dst_msg.case_key);
     return TransferStatus::Ok;
-  } else if (src->_multiplex && dst->_simplex) {
-    auto res = src->send_to(dst->_simplex->data);
-    if (res == TransferStatus::Ok && dst->_simplex->signal) {
-      dst->_simplex->signal->release();
+  } else if (std::holds_alternative<Multiplex>(this->_msg) && std::holds_alternative<Simplex>(dst->_msg)) {
+    auto& dst_msg = std::get<Simplex>(dst->_msg);
+    auto res = this->send_to(dst_msg.data);
+    if (res == TransferStatus::Ok && dst_msg.signal) {
+      dst_msg.signal->release();
     }
     return res;
-  } else if (src->_simplex && dst->_multiplex) {
-    auto res = dst->recv_from(src->_simplex->data);
-    if (res == TransferStatus::Ok && src->_simplex->signal) {
-      src->_simplex->signal->release();
+  } else if (std::holds_alternative<Simplex>(this->_msg) && std::holds_alternative<Multiplex>(dst->_msg)) {
+    auto& src_msg = std::get<Simplex>(this->_msg);
+    auto res = dst->recv_from(src_msg.data);
+    if (res == TransferStatus::Ok && src_msg.signal) {
+      src_msg.signal->release();
     }
     return res;
   } else {
-    auto res = dst->recv_from(src->_simplex->data);
-    if (res == TransferStatus::Ok && src->_simplex->signal) {
-      src->_simplex->signal->release();
+    auto& src_msg = std::get<Simplex>(this->_msg);
+    auto res = dst->recv_from(src_msg.data);
+    if (res == TransferStatus::Ok && src_msg.signal) {
+      src_msg.signal->release();
     }
     return res;
   }
@@ -166,24 +171,52 @@ auto BaseChannel::recv_from(BaseMsg* src, bool oneshot) -> TransferStatus {
 
 namespace cgo {
 
+void Select::on(int key, Select::Default) {
+  if (_default_key != InvalidSelectKey) {
+    throw std::runtime_error("select already has a default case");
+  }
+  if (key == InvalidSelectKey) {
+    throw std::runtime_error("key not allowed");
+  }
+  _default_key = key;
+}
+
 Coroutine<int> Select::operator()() {
   std::minstd_rand rng;
   std::shuffle(_listeners.begin(), this->_listeners.end(), rng);
   for (auto& fn : this->_listeners) {
     fn();
     std::unique_lock guard(_mtx);
-    if (_key != _impl::BaseMsg::Multiplex::InvalidKey) {
+    if (_key != InvalidSelectKey) {
       break;
     }
   }
-  if (!_enable_default) {
+
+  auto guard = defer([this]() { _drop(); });
+  if (_default_key == InvalidSelectKey) {
     co_await _signal.aquire();
+    std::unique_lock guard(_mtx);
+    co_return _key;
+  } else {
+    std::unique_lock guard(_mtx);
+    if (_key == InvalidSelectKey) {
+      _key = _default_key;
+    }
+    co_return _key;
   }
+}
+
+void Select::_commit(int case_key) {
+  _key = case_key;
+  _signal.release();
+}
+
+void Select::_drop() {
   for (auto msg : _msgs) {
     msg->drop();
   }
-  std::unique_lock guard(_mtx);
-  co_return _key;
+  _msgs.clear();
+  _listeners.clear();
 }
 
 }  // namespace cgo

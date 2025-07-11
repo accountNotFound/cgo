@@ -63,22 +63,22 @@ cgo::Coroutine<void> select() {
 
     sel.on(3, cgo::collect(cgo::sleep(std::chrono::milliseconds(5000)))) >> cgo::Dropout{}; // discard the value
 
-    sel.on_default(); // enable a default case (-1)
+    sel.on(-1, cgo::Select::Default{}); // enable a default case (-1)
 
     switch(co_await sel()) {
       case 1: {
         // never be here. Because ichan has no buffer and no reciever (`sel` is a sender in this case)
       }
       case 2: {
-        // go here after 1 sec if `Select::on_default()` is not called
-        // or it maybe ignored with `sel.on_default()`
+        // go here after 1 sec if don't set default
+        // or it maybe ignored with default case
       }
       case 3: {
         // nerver be here. Because this case is activated later (5 sec) than case 2 (1 sec)
       }
       default: {
-        // a.k.a the case -1. see `Select::on_default()`
-        // go here immediately if `Select::on_default()` is called and no other case becomes activated
+        // a.k.a the case -1. see `sel.on(-1, cgo::Select::Default{})`
+        // go here immediately if set default and no other case becomes activated
       }
     }
   }
