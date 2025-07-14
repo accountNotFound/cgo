@@ -49,19 +49,6 @@ Coroutine<bool> wait_event(
 
 #if defined(linux) || defined(__linux) || defined(__linux__)
 
-void set_sock_opt(Context& ctx, int fd) {
-  int flags = ::fcntl(fd, F_GETFL) | O_NONBLOCK;
-  if (::fcntl(fd, F_SETFL, flags) < 0) {
-    throw Socket::Error(fd, errno, ::strerror(errno));
-  }
-
-  // adapt for TCP and UDP
-  int optval = 1;
-  ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-
-  _impl::EventContext::at(ctx).add(fd, Event::ERR | Event::ONESHOT, [](Event) {});
-}
-
 Socket::Socket(Context& ctx, Socket::Protocol protocol, Socket::AddressFamily family)
     : _ctx(&ctx), _protocol(protocol), _family(family) {
   // TODO: IPV6 not support now
@@ -72,12 +59,12 @@ Socket::Socket(Context& ctx, Socket::Protocol protocol, Socket::AddressFamily fa
   if (_fd < 0) {
     throw Socket::Error(_fd, errno, ::strerror(errno));
   }
-  set_sock_opt(ctx, _fd);
+  _set_sock_opt();
 }
 
 Socket::Socket(Context& ctx, int fd, Protocol protocol, AddressFamily family)
     : _ctx(&ctx), _fd(fd), _protocol(protocol), _family(family) {
-  set_sock_opt(ctx, _fd);
+  _set_sock_opt();
 }
 
 std::expected<void, Socket::Error> Socket::bind(const std::string& ip, uint16_t port) {
@@ -111,7 +98,9 @@ std::expected<void, Socket::Error> Socket::listen(size_t backlog) {
   return {};
 }
 
-Coroutine<std::expected<Socket, Socket::Error>> Socket::accept() {
+Coroutine<std::expected<Socket, Socket::Error>> Socket::accept() { return accept(*_ctx); }
+
+Coroutine<std::expected<Socket, Socket::Error>> Socket::accept(Context& ctx) {
   if (_protocol != Protocol::TCP) {
     co_return std::unexpected(Error(_fd, 0, "Accept only supported for TCP sockets"));
   }
@@ -120,7 +109,7 @@ Coroutine<std::expected<Socket, Socket::Error>> Socket::accept() {
   while (true) {
     int fd = ::accept(_fd, (sockaddr*)&caddr, &sin_size);
     if (fd > 0) {
-      co_return Socket(*_ctx, fd, _protocol, _family);
+      co_return Socket(ctx, fd, _protocol, _family);
     }
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
       co_return std::unexpected(Error(_fd, errno, ::strerror(errno)));
@@ -288,6 +277,30 @@ Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>
 void Socket::close() {
   _impl::EventContext::at(*_ctx).del(_fd);
   ::close(_fd);
+}
+
+void Socket::_set_sock_opt() {
+  int flags = ::fcntl(_fd, F_GETFL) | O_NONBLOCK;
+  if (::fcntl(_fd, F_SETFL, flags) < 0) {
+    throw Socket::Error(_fd, errno, ::strerror(errno));
+  }
+
+  // adapt for TCP and UDP
+  int optval = 1;
+  ::setsockopt(_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+  // 增加接收缓冲区
+  int buf_size = 1024 * 1024;  // 1MB
+  setsockopt(_fd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
+
+  // 使用SO_REUSEPORT
+  int reuse = 1;
+  setsockopt(_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+
+  int enable = 1;
+  setsockopt(_fd, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable));
+
+  _impl::EventContext::at(*_ctx).add(_fd, Event::ERR | Event::ONESHOT, [](Event) {});
 }
 
 #endif

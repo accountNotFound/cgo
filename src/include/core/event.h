@@ -115,9 +115,11 @@ class EventLazySignal : public BaseLazySignal {
 namespace cgo {
 
 /**
- * @brief Only support TCP/IPV4 now
+ * @brief Only support IPV4 now
  *
  * @note Default constructor will just return a null socket. You may always call `Socket::create()`
+ *
+ * Don't use socket across context
  */
 class Socket {
  public:
@@ -153,6 +155,11 @@ class Socket {
 
   Coroutine<std::expected<Socket, Error>> accept();
 
+  /**
+   * @brief Accept a socket and bind to given context
+   */
+  Coroutine<std::expected<Socket, Error>> accept(Context& ctx);
+
   Coroutine<std::expected<void, Error>> connect(
       const std::string& ip, uint16_t port,
       std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1));
@@ -187,6 +194,8 @@ class Socket {
   Socket(Context& ctx, Protocol protocol, AddressFamily family);
 
   Socket(Context& ctx, int fd, Protocol protocol, AddressFamily family);
+
+  void _set_sock_opt();
 };
 
 }  // namespace cgo

@@ -137,10 +137,10 @@ void SchedContext::Condition::_schedule_from_this() {
   if (_blocked_head.next() == &_blocked_tail) {
     return;
   }
-  auto task = _blocked_head.unlink_back();
+  auto task = static_cast<Task*>(_blocked_head.unlink_back());
   auto ctx = _scheduled_ctx = task->ctx;
   auto id = task->id;
-  SchedContext::at(*ctx)._scheduler(id).push(Allocator::Handler(static_cast<Task*>(task)));
+  SchedContext::at(*ctx)._scheduler(id).push(Allocator::Handler(task));
 }
 
 void SchedContext::Condition::_suspend_to_this(Allocator::Handler task, Spinlock* waiting_mtx) {
