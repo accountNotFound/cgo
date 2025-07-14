@@ -84,7 +84,7 @@ class EventContext {
     return handler(pindex).handle(batch_size, timeout.count());
   }
 
-  auto handler(int i) -> Dispatcher& { return _dispatchers[i % _dispatchers.size()]; }
+  auto handler(size_t i) -> Dispatcher& { return _dispatchers[i % _dispatchers.size()]; }
 
  private:
   std::vector<Dispatcher> _dispatchers;
@@ -156,7 +156,7 @@ class Socket {
   Coroutine<std::expected<Socket, Error>> accept();
 
   /**
-   * @brief Accept a socket and bind to given context
+   * @brief Dispatch the accepted socket to given context
    */
   Coroutine<std::expected<Socket, Error>> accept(Context& ctx);
 
@@ -171,10 +171,10 @@ class Socket {
       const std::string& data,
       std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1));
 
-  Coroutine<std::expected<size_t, Error>> send_to(const std::string& data, const std::string& ip, uint16_t port,
-                                                  std::chrono::milliseconds timeout = std::chrono::milliseconds(-1));
+  Coroutine<std::expected<size_t, Error>> sendto(const std::string& data, const std::string& ip, uint16_t port,
+                                                 std::chrono::milliseconds timeout = std::chrono::milliseconds(-1));
 
-  Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>, Error>> recv_from(
+  Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>, Error>> recvfrom(
       size_t size, std::chrono::milliseconds timeout = std::chrono::milliseconds(-1));
 
   void close();

@@ -65,10 +65,12 @@ void Context::_run(size_t pindex) {
     if (sched_flag || timed_flag || now >= next_sched_time) {
       if (now - last_handle_time > std::chrono::milliseconds(1)) {
         _event_ctx->run_handler(pindex, 128, std::chrono::milliseconds(0));
+        last_handle_time = now;
       }
     } else {
       auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(next_sched_time - now);
       _event_ctx->run_handler(pindex, 128, std::min(timeout, std::chrono::milliseconds(50)));
+      last_handle_time = std::chrono::steady_clock::now();
     }
   }
 

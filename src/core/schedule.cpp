@@ -35,18 +35,13 @@ SchedContext::~SchedContext() {}
 
 void SchedContext::final_schedule(size_t pindex) {
   auto& scheduler = _scheduler(pindex);
-  {
-    std::unique_lock guard(scheduler._mtx);
-    scheduler._signal = nullptr;
-  }
+  scheduler._signal = nullptr;
+
   auto& allocator = _allocator(pindex);
-  {
-    std::unique_lock guard(allocator._mtx);
-    for (auto& task : allocator._pool) {
-      if (task.waiting_cond) {
-        task.waiting_cond->_remove(&task);
-        FrameOperator::destroy(task.fn);
-      }
+  for (auto& task : allocator._pool) {
+    if (task.waiting_cond) {
+      task.waiting_cond->_remove(&task);
+      FrameOperator::destroy(task.fn);
     }
   }
 }

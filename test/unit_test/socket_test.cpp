@@ -13,23 +13,24 @@ struct Config {
   uint16_t svr_port = 8080;
   size_t sock_timeout_ms = 2000;
 
-  size_t cli_num = 10000;
-  size_t cli_interval_ms = 50;
+  size_t cli_num = 800;
+  size_t cli_interval_ms = 0;
   size_t req_pkg_nbytes = 1024;
   size_t res_pgk_nbytes = 1024;
   size_t svr_listen_size = 65535;
 
-  size_t cli_ctx_threads = 4;
+  size_t cli_ctx_threads = 1;
   size_t svr_ctx_threads = 1;
 
   size_t test_duration_sec = 10;
 
   std::string str() {
     std::ostringstream oss;
-    oss << "client thread: " << cli_ctx_threads << "\n";
-    oss << "server thread: " << svr_ctx_threads << "\n";
-    oss << "client num: " << cli_num << "\n";
     oss << "socket timeout ms: " << sock_timeout_ms << "\n";
+    oss << "server thread: " << svr_ctx_threads << "\n";
+    oss << "client thread: " << cli_ctx_threads << "\n";
+    oss << "client num: " << cli_num << "\n";
+    oss << "client interval ms: " << cli_interval_ms << "\n";
     return oss.str();
   }
 };
@@ -314,9 +315,7 @@ cgo::Coroutine<void> tcp_server(const Config& conf, Metric& metric) {
   }
 }
 
-TEST(socket, tcp_benchmark) {
-  Config conf;
-
+void tcp_benchmark_test(Config& conf) {
   Metric svr_metric;
   cgo::Context svr_ctx;
   svr_ctx.start(1);
@@ -343,4 +342,16 @@ TEST(socket, tcp_benchmark) {
   // std::cout << svr_metric.str();
   ::printf("Client:\n");
   std::cout << cli_metric.str();
+}
+
+TEST(socket, tcp_bench) {
+  for (int i = 0; i < 4; ++i) {
+    Config conf;
+    conf.cli_num = 1000;
+    conf.cli_ctx_threads = i + 1;
+    conf.svr_ctx_threads = i + 1;
+    conf.test_duration_sec = 10;
+    tcp_benchmark_test(conf);
+    std::cout << "\n\n";
+  }
 }

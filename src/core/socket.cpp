@@ -213,8 +213,8 @@ Coroutine<std::expected<void, Socket::Error>> Socket::send(const std::string& da
   co_return {};
 }
 
-Coroutine<std::expected<size_t, Socket::Error>> Socket::send_to(const std::string& data, const std::string& ip,
-                                                                uint16_t port, std::chrono::milliseconds timeout) {
+Coroutine<std::expected<size_t, Socket::Error>> Socket::sendto(const std::string& data, const std::string& ip,
+                                                               uint16_t port, std::chrono::milliseconds timeout) {
   if (_protocol != Protocol::UDP) {
     co_return std::unexpected(Error(_fd, 0, "send_to only supported for UDP sockets"));
   }
@@ -242,7 +242,7 @@ Coroutine<std::expected<size_t, Socket::Error>> Socket::send_to(const std::strin
   }
 }
 
-Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>, Socket::Error>> Socket::recv_from(
+Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>, Socket::Error>> Socket::recvfrom(
     size_t size, std::chrono::milliseconds timeout) {
   if (_protocol != Protocol::UDP) {
     co_return std::unexpected(Error(_fd, 0, "recv_from only supported for UDP sockets"));
@@ -291,14 +291,14 @@ void Socket::_set_sock_opt() {
 
   // 增加接收缓冲区
   int buf_size = 1024 * 1024;  // 1MB
-  setsockopt(_fd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
+  ::setsockopt(_fd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
 
   // 使用SO_REUSEPORT
   int reuse = 1;
-  setsockopt(_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+  ::setsockopt(_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
 
   int enable = 1;
-  setsockopt(_fd, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable));
+  ::setsockopt(_fd, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable));
 
   _impl::EventContext::at(*_ctx).add(_fd, Event::ERR | Event::ONESHOT, [](Event) {});
 }
