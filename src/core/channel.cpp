@@ -4,6 +4,18 @@
 
 namespace cgo::_impl {
 
+void BaseMsg::Simplex::commit() {
+  if (signal) {
+    signal->release();
+  }
+}
+
+void BaseMsg::Multiplex::commit() {
+  auto& select = *static_cast<Select*>(this->select);
+  select._key = case_key;
+  select._signal.release();
+}
+
 auto BaseMsg::recv_from(void* src) -> BaseMsg::TransferStatus {
   if (std::holds_alternative<Multiplex>(this->_msg)) {
     auto& dst_msg = std::get<Multiplex>(this->_msg);
@@ -13,14 +25,12 @@ auto BaseMsg::recv_from(void* src) -> BaseMsg::TransferStatus {
       return TransferStatus::InvalidSrc;
     }
     _move(src, dst_msg.data);
-    dst_select._commit(dst_msg.case_key);
+    dst_msg.commit();
     return TransferStatus::Ok;
   } else {
     auto& dst_msg = std::get<Simplex>(this->_msg);
     _move(src, dst_msg.data);
-    if (dst_msg.signal) {
-      dst_msg.signal->release();
-    }
+    dst_msg.commit();
     return TransferStatus::Ok;
   }
 }
@@ -34,14 +44,12 @@ auto BaseMsg::send_to(void* dst) -> BaseMsg::TransferStatus {
       return TransferStatus::InvalidSrc;
     }
     _move(src_msg.data, dst);
-    src_select._commit(src_msg.case_key);
+    src_msg.commit();
     return TransferStatus::Ok;
   } else {
     auto& src_msg = std::get<Simplex>(this->_msg);
     _move(src_msg.data, dst);
-    if (src_msg.signal) {
-      src_msg.signal->release();
-    }
+    src_msg.commit();
     return TransferStatus::Ok;
   }
 }
@@ -68,28 +76,28 @@ auto BaseMsg::send_to(BaseMsg* dst) -> BaseMsg::TransferStatus {
       return TransferStatus::InvalidDst;
     }
     _move(src_msg.data, dst_msg.data);
-    src_select._commit(src_msg.case_key);
-    dst_select._commit(dst_msg.case_key);
+    src_msg.commit();
+    dst_msg.commit();
     return TransferStatus::Ok;
   } else if (std::holds_alternative<Multiplex>(this->_msg) && std::holds_alternative<Simplex>(dst->_msg)) {
     auto& dst_msg = std::get<Simplex>(dst->_msg);
     auto res = this->send_to(dst_msg.data);
-    if (res == TransferStatus::Ok && dst_msg.signal) {
-      dst_msg.signal->release();
+    if (res == TransferStatus::Ok) {
+      dst_msg.commit();
     }
     return res;
   } else if (std::holds_alternative<Simplex>(this->_msg) && std::holds_alternative<Multiplex>(dst->_msg)) {
     auto& src_msg = std::get<Simplex>(this->_msg);
     auto res = dst->recv_from(src_msg.data);
-    if (res == TransferStatus::Ok && src_msg.signal) {
-      src_msg.signal->release();
+    if (res == TransferStatus::Ok) {
+      src_msg.commit();
     }
     return res;
   } else {
     auto& src_msg = std::get<Simplex>(this->_msg);
     auto res = dst->recv_from(src_msg.data);
-    if (res == TransferStatus::Ok && src_msg.signal) {
-      src_msg.signal->release();
+    if (res == TransferStatus::Ok) {
+      src_msg.commit();
     }
     return res;
   }
@@ -204,11 +212,6 @@ Coroutine<int> Select::operator()() {
     }
     co_return _key;
   }
-}
-
-void Select::_commit(int case_key) {
-  _key = case_key;
-  _signal.release();
 }
 
 void Select::_drop() {
