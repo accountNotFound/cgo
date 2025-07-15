@@ -15,26 +15,21 @@ namespace cgo {
 
 using _impl::Event;
 
-/**
- * @return True if event activated, or False if timeout
- */
-Coroutine<bool> wait_event(
-    Context& ctx, int fd, Event on,
-    std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1)) {
+Coroutine<bool> Socket::_wait_sock_event(Event on, std::chrono::duration<double, std::milli> timeout) {
   struct Signal {
     std::atomic<int> timeout = 0;
     Semaphore signal = {0};
   };
 
   auto s = std::make_shared<Signal>(0);
-  _impl::EventContext::at(ctx).mod(fd, on, [s](Event) {
+  _impl::EventContext::at(*_ctx).mod(_fd, on, [s](Event) {
     int expected = 0;
     if (s->timeout.compare_exchange_weak(expected, 1)) {
       s->signal.release();
     }
   });
   if (timeout.count() > 0) {
-    _impl::TimedContext::at(ctx).create_timeout(
+    _impl::TimedContext::at(*_ctx).create_timeout(
         [s]() {
           int expected = 0;
           if (s->timeout.compare_exchange_weak(expected, -1)) {
@@ -114,7 +109,7 @@ Coroutine<std::expected<Socket, Socket::Error>> Socket::accept(Context& ctx) {
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
       co_return std::unexpected(Error(_fd, errno, ::strerror(errno)));
     }
-    co_await wait_event(*_ctx, _fd, Event::IN | Event::ONESHOT);
+    co_await _wait_sock_event(Event::IN | Event::ONESHOT);
   }
 }
 
@@ -142,7 +137,7 @@ Coroutine<std::expected<void, Socket::Error>> Socket::connect(const std::string&
       co_return std::unexpected(Error(_fd, errno, ::strerror(errno)));
     }
 
-    if (!(co_await wait_event(*_ctx, _fd, Event::OUT | Event::ONESHOT, timeout))) {
+    if (!(co_await _wait_sock_event(Event::OUT | Event::ONESHOT, timeout))) {
       co_return std::unexpected(Error(_fd, errno, "connect timeout"));
     }
 
@@ -182,7 +177,7 @@ Coroutine<std::expected<std::string, Socket::Error>> Socket::recv(size_t size,
         co_return std::unexpected(Error(_fd, errno, ::strerror(errno)));
       }
     }
-    if (!(co_await wait_event(*_ctx, _fd, Event::IN | Event::ONESHOT, timeout))) {
+    if (!(co_await _wait_sock_event(Event::IN | Event::ONESHOT, timeout))) {
       co_return std::unexpected(Error(_fd, ETIMEDOUT, "recv timeout"));
     }
   }
@@ -206,7 +201,7 @@ Coroutine<std::expected<void, Socket::Error>> Socket::send(const std::string& da
         co_return std::unexpected(Error(_fd, errno, ::strerror(errno)));
       }
     }
-    if (!(co_await wait_event(*_ctx, _fd, Event::OUT | Event::ONESHOT, timeout))) {
+    if (!(co_await _wait_sock_event(Event::OUT | Event::ONESHOT, timeout))) {
       co_return std::unexpected(Error(_fd, ETIMEDOUT, "send timeout"));
     }
   }
@@ -236,7 +231,7 @@ Coroutine<std::expected<size_t, Socket::Error>> Socket::sendto(const std::string
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
       co_return std::unexpected(Error(_fd, errno, ::strerror(errno)));
     }
-    if (!(co_await wait_event(*_ctx, _fd, Event::OUT | Event::ONESHOT, timeout))) {
+    if (!(co_await _wait_sock_event(Event::OUT | Event::ONESHOT, timeout))) {
       co_return std::unexpected(Error(_fd, ETIMEDOUT, "send_to timeout"));
     }
   }
@@ -268,7 +263,7 @@ Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>
         co_return std::unexpected(Error(_fd, errno, ::strerror(errno)));
       }
     }
-    if (!(co_await wait_event(*_ctx, _fd, Event::IN | Event::ONESHOT, timeout))) {
+    if (!(co_await _wait_sock_event(Event::IN | Event::ONESHOT, timeout))) {
       co_return std::unexpected(Error(_fd, ETIMEDOUT, "recv_from timeout"));
     }
   }

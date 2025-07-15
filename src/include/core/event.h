@@ -38,17 +38,17 @@ class Event {
 
 class EventContext {
  public:
-  struct Handler {
+  struct Task {
     int fd;
     Event on;
     std::function<void(Event)> fn;
   };
 
-  class Dispatcher {
+  class Handler {
    public:
-    Dispatcher();
+    Handler();
 
-    ~Dispatcher();
+    ~Handler();
 
     void add(int fd, Event ev, std::function<void(Event)>&& callback);
 
@@ -60,15 +60,15 @@ class EventContext {
 
    private:
     Spinlock _mtx;
-    std::unordered_map<int, Handler> _hid_calls;
-    std::unordered_map<int, int> _fd_hids;
+    std::unordered_map<int, Task> _tid_calls;
+    std::unordered_map<int, int> _fd_tids;
     std::atomic<int> _gid = 0;
     int _fd = 0;
   };
 
   static auto at(Context& ctx) -> EventContext&;
 
-  EventContext(size_t n_partition) : _dispatchers(n_partition) {}
+  EventContext(size_t n_partition) : _handlers(n_partition) {}
 
   void add(int fd, Event ev, std::function<void(Event)>&& callback) {
     handler(fd).add(fd, ev, std::forward<std::function<void(Event)>>(callback));
@@ -84,10 +84,10 @@ class EventContext {
     return handler(pindex).handle(batch_size, timeout.count());
   }
 
-  auto handler(size_t i) -> Dispatcher& { return _dispatchers[i % _dispatchers.size()]; }
+  auto handler(size_t i) -> Handler& { return _handlers[i % _handlers.size()]; }
 
  private:
-  std::vector<Dispatcher> _dispatchers;
+  std::vector<Handler> _handlers;
 };
 
 class EventLazySignal : public BaseLazySignal {
@@ -196,6 +196,12 @@ class Socket {
   Socket(Context& ctx, int fd, Protocol protocol, AddressFamily family);
 
   void _set_sock_opt();
+
+  /**
+   * @return True if event activated, or False if timeout
+   */
+  Coroutine<bool> _wait_sock_event(_impl::Event on,
+                                   std::chrono::duration<double, std::milli> timeout = std::chrono::milliseconds(-1));
 };
 
 }  // namespace cgo

@@ -29,59 +29,59 @@ size_t Event::to_linux(Event cgo_event) {
   return linux_event;
 }
 
-EventContext::Dispatcher::Dispatcher() { _fd = ::epoll_create(1024); }
+EventContext::Handler::Handler() { _fd = ::epoll_create(1024); }
 
-EventContext::Dispatcher::~Dispatcher() { ::close(_fd); }
+EventContext::Handler::~Handler() { ::close(_fd); }
 
-void EventContext::Dispatcher::add(int fd, Event on, std::function<void(Event)>&& fn) {
+void EventContext::Handler::add(int fd, Event on, std::function<void(Event)>&& fn) {
   std::unique_lock guard(_mtx);
   ::epoll_event ev;
   ev.events = Event::to_linux(on) | ::EPOLLET;
-  int hid = ev.data.u64 = _gid.fetch_add(1);
+  int tid = ev.data.u64 = _gid.fetch_add(1);
 
-  _hid_calls[hid] = {fd, on, std::forward<decltype(fn)>(fn)};
-  _fd_hids[fd] = hid;
+  _tid_calls[tid] = {fd, on, std::forward<decltype(fn)>(fn)};
+  _fd_tids[fd] = tid;
 
   if (::epoll_ctl(_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
     throw std::runtime_error("epoll_ctl add failed");
   }
 }
 
-void EventContext::Dispatcher::mod(int fd, Event on, std::function<void(Event)>&& fn) {
+void EventContext::Handler::mod(int fd, Event on, std::function<void(Event)>&& fn) {
   std::unique_lock guard(_mtx);
   ::epoll_event ev;
   ev.events = Event::to_linux(on) | ::EPOLLET;
-  int hid = ev.data.u64 = _gid.fetch_add(1);
+  int tid = ev.data.u64 = _gid.fetch_add(1);
 
-  _hid_calls[hid] = {fd, on, std::forward<decltype(fn)>(fn)};
-  _hid_calls.erase(_fd_hids[fd]);
-  _fd_hids[fd] = hid;
+  _tid_calls[tid] = {fd, on, std::forward<decltype(fn)>(fn)};
+  _tid_calls.erase(_fd_tids[fd]);
+  _fd_tids[fd] = tid;
 
   if (::epoll_ctl(_fd, EPOLL_CTL_MOD, fd, &ev) != 0) {
     throw std::runtime_error("epoll_ctl mod failed");
   }
 }
 
-void EventContext::Dispatcher::del(int fd) {
+void EventContext::Handler::del(int fd) {
   std::unique_lock guard(_mtx);
   ::epoll_ctl(_fd, EPOLL_CTL_DEL, fd, nullptr);
 
-  _hid_calls.erase(_fd_hids[fd]);
-  _fd_hids.erase(fd);
+  _tid_calls.erase(_fd_tids[fd]);
+  _fd_tids.erase(fd);
 }
 
-size_t EventContext::Dispatcher::handle(size_t handle_batch, size_t timeout_ms) {
+size_t EventContext::Handler::handle(size_t handle_batch, size_t timeout_ms) {
   std::vector<::epoll_event> ev_buffer(handle_batch);
   int active_num = ::epoll_wait(_fd, ev_buffer.data(), ev_buffer.size(), timeout_ms);
   if (active_num <= 0) {
     return 0;
   }
   for (int i = 0; i < active_num; ++i) {
-    int hid = ev_buffer[i].data.u64;
+    int tid = ev_buffer[i].data.u64;
     Event ev = Event::from_linux(ev_buffer[i].events);
     std::unique_lock guard(this->_mtx);
-    if (_hid_calls.contains(hid)) {
-      auto& callback = _hid_calls[hid];
+    if (_tid_calls.contains(tid)) {
+      auto& callback = _tid_calls[tid];
       if (callback.on & ev) {
         callback.fn(ev);
       }
