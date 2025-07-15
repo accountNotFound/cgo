@@ -31,6 +31,7 @@ struct Config {
     oss << "client thread: " << cli_ctx_threads << "\n";
     oss << "client num: " << cli_num << "\n";
     oss << "client interval ms: " << cli_interval_ms << "\n";
+    oss << "test duration sec: " << test_duration_sec << "\n";
     return oss.str();
   }
 };
