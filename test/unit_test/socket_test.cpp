@@ -9,6 +9,7 @@
 
 struct Config {
  public:
+  bool is_v6 = false;
   std::string svr_ip = "127.0.0.1";
   uint16_t svr_port = 8080;
   size_t sock_timeout_ms = 2000;
@@ -26,6 +27,7 @@ struct Config {
 
   std::string str() const {
     std::ostringstream oss;
+    oss << "address family: " << (is_v6 ? "Ipv6" : "Ipv4") << "\n";
     oss << "socket timeout ms: " << sock_timeout_ms << "\n";
     oss << "server thread: " << svr_ctx_threads << "\n";
     oss << "client thread: " << cli_ctx_threads << "\n";
@@ -194,7 +196,8 @@ std::string generate_test_data(size_t size) {
 
 cgo::Coroutine<void> tcp_client(const Config& conf, Metric& metric, std::atomic<size_t>& wg) {
   auto& ctx = cgo::this_coroutine_ctx();
-  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::TCP, cgo::Socket::AddressFamily::IPv4);
+  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::TCP,
+                                  conf.is_v6 ? cgo::Socket::AddressFamily::IPv6 : cgo::Socket::AddressFamily::IPv4);
   auto guard = cgo::defer([&sock, &wg]() {
     sock.close();
     wg.fetch_add(1);
@@ -288,10 +291,11 @@ cgo::Coroutine<void> tcp_session(const Config& conf, cgo::Socket sock, Metric& m
 
 cgo::Coroutine<void> tcp_server(const Config& conf, Metric& metric) {
   auto& ctx = cgo::this_coroutine_ctx();
-  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::TCP, cgo::Socket::AddressFamily::IPv4);
+  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::TCP,
+                                  conf.is_v6 ? cgo::Socket::AddressFamily::IPv6 : cgo::Socket::AddressFamily::IPv4);
   auto guard = cgo::defer([&sock]() { sock.close(); });
 
-  sock.bind("0.0.0.0", conf.svr_port);
+  sock.bind(conf.is_v6 ? "::" : "0.0.0.0", conf.svr_port);
   sock.listen(conf.svr_listen_size);
 
   cgo::Context session_ctx;
@@ -347,6 +351,8 @@ void tcp_benchmark_test(Config& conf) {
 
 TEST(socket, tcp_bench) {
   Config conf;
+  conf.is_v6 = false;
+  conf.svr_ip = conf.is_v6 ? "::" : "0.0.0.0";
   conf.test_duration_sec = 10;
   conf.svr_port = 8080;
   conf.sock_timeout_ms = 2000;
@@ -362,12 +368,13 @@ TEST(socket, tcp_bench) {
 
 cgo::Coroutine<void> udp_client(const Config& conf, Metric& metric, std::atomic<size_t>& wg) {
   auto& ctx = cgo::this_coroutine_ctx();
-  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::UDP, cgo::Socket::AddressFamily::IPv4);
+  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::UDP,
+                                  conf.is_v6 ? cgo::Socket::AddressFamily::IPv6 : cgo::Socket::AddressFamily::IPv4);
   auto guard = cgo::defer([&sock, &wg]() {
     sock.close();
     wg.fetch_add(1);
   });
-  sock.bind("0.0.0.0", 0);
+  sock.bind(conf.is_v6 ? "::" : "0.0.0.0", 0);
   auto end_tp = std::chrono::steady_clock::now() + std::chrono::seconds(conf.test_duration_sec);
 
   bool disconnect = true;
@@ -427,12 +434,13 @@ cgo::Coroutine<void> udp_client(const Config& conf, Metric& metric, std::atomic<
 cgo::Coroutine<void> udp_session(const Config& conf, std::string cli_ip, uint16_t cli_port, Metric& metric,
                                  std::atomic<size_t>& wg) {
   auto& ctx = cgo::this_coroutine_ctx();
-  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::UDP, cgo::Socket::AddressFamily::IPv4);
+  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::UDP,
+                                  conf.is_v6 ? cgo::Socket::AddressFamily::IPv6 : cgo::Socket::AddressFamily::IPv4);
   auto guard = cgo::defer([&sock, &wg]() {
     sock.close();
     wg.fetch_add(1);
   });
-  sock.bind("0.0.0.0", 0);
+  sock.bind(conf.is_v6 ? "::" : "0.0.0.0", 0);
 
   auto ok = co_await sock.sendto("1", cli_ip, cli_port, std::chrono::milliseconds(conf.sock_timeout_ms));
   if (!ok) {
@@ -471,10 +479,11 @@ cgo::Coroutine<void> udp_session(const Config& conf, std::string cli_ip, uint16_
 
 cgo::Coroutine<void> udp_server(const Config& conf, Metric& metric) {
   auto& ctx = cgo::this_coroutine_ctx();
-  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::UDP, cgo::Socket::AddressFamily::IPv4);
+  auto sock = cgo::Socket::create(ctx, cgo::Socket::Protocol::UDP,
+                                  conf.is_v6 ? cgo::Socket::AddressFamily::IPv6 : cgo::Socket::AddressFamily::IPv4);
   auto guard = cgo::defer([&sock]() { sock.close(); });
 
-  sock.bind("0.0.0.0", conf.svr_port);
+  sock.bind(conf.is_v6 ? "::" : "0.0.0.0", conf.svr_port);
 
   cgo::Context session_ctx;
   size_t session_num = 0;
@@ -534,6 +543,8 @@ void udp_benchmark_test(Config& conf) {
 
 TEST(socket, udp_bench) {
   Config conf;
+  conf.is_v6 = true;
+  conf.svr_ip = conf.is_v6 ? "::" : "0.0.0.0";
   conf.test_duration_sec = 10;
   conf.svr_port = 8081;
   conf.sock_timeout_ms = 2000;

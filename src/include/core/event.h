@@ -127,12 +127,12 @@ class Socket {
     TCP,
     UDP,
     ICMP,  // not support now
-    SCTP   // not support now
+    SCTP,  // not support now
   };
 
   enum class AddressFamily {
     IPv4,
-    IPv6  // not support now
+    IPv6,
   };
 
   struct Error {
