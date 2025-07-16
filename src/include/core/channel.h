@@ -281,6 +281,8 @@ class Select {
 
   Select(Select&&) = delete;
 
+  ~Select() { _drop(); }
+
   /**
    * @param key: The unique key specifing certain channel event. Key should be >= 0
    */

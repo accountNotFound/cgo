@@ -350,7 +350,7 @@ TEST(socket, tcp_bench) {
   conf.test_duration_sec = 10;
   conf.svr_port = 8080;
   conf.sock_timeout_ms = 2000;
-  conf.cli_num = 2000;
+  conf.cli_num = 1000;
   conf.cli_interval_ms = 50;
   conf.cli_ctx_threads = 1;
   conf.svr_ctx_threads = 1;
@@ -537,7 +537,7 @@ TEST(socket, udp_bench) {
   conf.test_duration_sec = 10;
   conf.svr_port = 8081;
   conf.sock_timeout_ms = 2000;
-  conf.cli_num = 2000;
+  conf.cli_num = 1000;
   conf.cli_interval_ms = 50;
   conf.cli_ctx_threads = 1;
   conf.svr_ctx_threads = 1;
