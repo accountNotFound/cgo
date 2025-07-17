@@ -35,18 +35,13 @@ SchedContext::~SchedContext() {}
 
 void SchedContext::final_schedule(size_t pindex) {
   auto& scheduler = _scheduler(pindex);
-  {
-    std::unique_lock guard(scheduler._mtx);
-    scheduler._signal = nullptr;
-  }
+  scheduler._signal = nullptr;
+
   auto& allocator = _allocator(pindex);
-  {
-    std::unique_lock guard(allocator._mtx);
-    for (auto& task : allocator._pool) {
-      if (task.waiting_cond) {
-        task.waiting_cond->_remove(&task);
-        FrameOperator::destroy(task.fn);
-      }
+  for (auto& task : allocator._pool) {
+    if (task.waiting_cond) {
+      task.waiting_cond->_remove(&task);
+      FrameOperator::destroy(task.fn);
     }
   }
 }
@@ -137,10 +132,10 @@ void SchedContext::Condition::_schedule_from_this() {
   if (_blocked_head.next() == &_blocked_tail) {
     return;
   }
-  auto task = _blocked_head.unlink_back();
+  auto task = static_cast<Task*>(_blocked_head.unlink_back());
   auto ctx = _scheduled_ctx = task->ctx;
   auto id = task->id;
-  SchedContext::at(*ctx)._scheduler(id).push(Allocator::Handler(static_cast<Task*>(task)));
+  SchedContext::at(*ctx)._scheduler(id).push(Allocator::Handler(task));
 }
 
 void SchedContext::Condition::_suspend_to_this(Allocator::Handler task, Spinlock* waiting_mtx) {

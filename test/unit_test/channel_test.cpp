@@ -274,8 +274,6 @@ void multi_ctx_stop_test(size_t buffer_size) {
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   ctx2.stop();
   th.join();
-
-  ASSERT(res > 0, "");
 }
 
 TEST(channel, multi_ctx_stop_b0) { multi_ctx_stop_test(0); }

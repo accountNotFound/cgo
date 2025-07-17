@@ -38,17 +38,17 @@ class Event {
 
 class EventContext {
  public:
-  struct Handler {
+  struct Task {
     int fd;
     Event on;
     std::function<void(Event)> fn;
   };
 
-  class Dispatcher {
+  class Handler {
    public:
-    Dispatcher();
+    Handler();
 
-    ~Dispatcher();
+    ~Handler();
 
     void add(int fd, Event ev, std::function<void(Event)>&& callback);
 
@@ -60,15 +60,15 @@ class EventContext {
 
    private:
     Spinlock _mtx;
-    std::unordered_map<int, Handler> _hid_calls;
-    std::unordered_map<int, int> _fd_hids;
+    std::unordered_map<int, Task> _tid_calls;
+    std::unordered_map<int, int> _fd_tids;
     std::atomic<int> _gid = 0;
     int _fd = 0;
   };
 
   static auto at(Context& ctx) -> EventContext&;
 
-  EventContext(size_t n_partition) : _dispatchers(n_partition) {}
+  EventContext(size_t n_partition) : _handlers(n_partition) {}
 
   void add(int fd, Event ev, std::function<void(Event)>&& callback) {
     handler(fd).add(fd, ev, std::forward<std::function<void(Event)>>(callback));
@@ -84,10 +84,10 @@ class EventContext {
     return handler(pindex).handle(batch_size, timeout.count());
   }
 
-  auto handler(int i) -> Dispatcher& { return _dispatchers[i % _dispatchers.size()]; }
+  auto handler(size_t i) -> Handler& { return _handlers[i % _handlers.size()]; }
 
  private:
-  std::vector<Dispatcher> _dispatchers;
+  std::vector<Handler> _handlers;
 };
 
 class EventLazySignal : public BaseLazySignal {
@@ -115,31 +115,53 @@ class EventLazySignal : public BaseLazySignal {
 namespace cgo {
 
 /**
- * @brief Only support TCP/IPV4 now
+ * @brief Only support IPV4 now
  *
  * @note Default constructor will just return a null socket. You may always call `Socket::create()`
+ *
+ * Don't use socket across context
  */
 class Socket {
  public:
+  enum class Protocol {
+    TCP,
+    UDP,
+    ICMP,  // not support now
+    SCTP,  // not support now
+  };
+
+  enum class AddressFamily {
+    IPv4,
+    IPv6,
+  };
+
   struct Error {
     int fd = -1;
-    std::string msg = "";
+    int err_code = 0;
+    std::string err_msg = "";
 
     operator bool() const { return fd > 0; }
   };
 
-  static auto create(Context& ctx) -> Socket { return Socket(ctx); }
+  static auto create(Context& ctx, Protocol protocol, AddressFamily family) -> Socket {
+    return Socket(ctx, protocol, family);
+  }
 
   Socket() = default;
 
-  std::expected<void, Error> bind(size_t port);
+  std::expected<void, Error> bind(const std::string& ip, uint16_t port);
 
   std::expected<void, Error> listen(size_t backlog = 1024);
 
   Coroutine<std::expected<Socket, Error>> accept();
 
+  /**
+   * @brief Dispatch the accepted socket to given context
+   */
+  Coroutine<std::expected<Socket, Error>> accept(Context& ctx);
+
   Coroutine<std::expected<void, Error>> connect(
-      const std::string& ip, size_t port,
+      const std::string& ip, uint16_t port,
       std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1));
 
   Coroutine<std::expected<std::string, Error>> recv(
@@ -148,6 +170,12 @@ class Socket {
   Coroutine<std::expected<void, Error>> send(
       const std::string& data,
       std::chrono::duration<double, std::milli> timeout = std::chrono::duration<double, std::milli>(-1));
+
+  Coroutine<std::expected<size_t, Error>> sendto(const std::string& data, const std::string& ip, uint16_t port,
+                                                 std::chrono::milliseconds timeout = std::chrono::milliseconds(-1));
+
+  Coroutine<std::expected<std::pair<std::string, std::pair<std::string, uint16_t>>, Error>> recvfrom(
+      size_t size, std::chrono::milliseconds timeout = std::chrono::milliseconds(-1));
 
   void close();
 
@@ -160,10 +188,20 @@ class Socket {
  private:
   Context* _ctx = nullptr;
   int _fd = -1;
+  Protocol _protocol;
+  AddressFamily _family;
 
-  Socket(Context& ctx);
+  Socket(Context& ctx, Protocol protocol, AddressFamily family);
 
-  Socket(Context& ctx, int fd);
+  Socket(Context& ctx, int fd, Protocol protocol, AddressFamily family);
+
+  void _set_sock_opt();
+
+  /**
+   * @return True if event activated, or False if timeout
+   */
+  Coroutine<bool> _wait_sock_event(_impl::Event on,
+                                   std::chrono::duration<double, std::milli> timeout = std::chrono::milliseconds(-1));
 };
 
 }  // namespace cgo

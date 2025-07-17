@@ -18,12 +18,16 @@ class BaseMsg : public BaseLinked<BaseMsg> {
   struct Simplex {
     void* data;
     Semaphore* signal;
+
+    void commit();
   };
 
   struct Multiplex {
     void* data;
     void* select;
     int case_key;
+
+    void commit();
   };
 
   BaseMsg() = default;
@@ -277,6 +281,8 @@ class Select {
 
   Select(Select&&) = delete;
 
+  ~Select() { _drop(); }
+
   /**
    * @param key: The unique key specifing certain channel event. Key should be >= 0
    */
@@ -302,8 +308,6 @@ class Select {
 
   std::vector<_impl::BaseMsg*> _msgs;
   std::vector<std::function<void()>> _listeners;
-
-  void _commit(int case_key);
 
   void _drop();
 };
