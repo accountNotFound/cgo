@@ -106,7 +106,7 @@ void SchedContext::Scheduler::push(SchedContext::Allocator::Handler task) {
 
 auto SchedContext::Scheduler::pop() -> SchedContext::Allocator::Handler {
   std::unique_lock guard(_mtx);
-  if (_runnable_head.next() == &_runnable_tail) {
+  if (_runnable_head.back() == &_runnable_tail) {
     return nullptr;
   }
   auto task = _runnable_head.unlink_back();
@@ -129,7 +129,7 @@ void SchedContext::Condition::notify() {
 }
 
 void SchedContext::Condition::_schedule_from_this() {
-  if (_blocked_head.next() == &_blocked_tail) {
+  if (_blocked_head.back() == &_blocked_tail) {
     return;
   }
   auto task = static_cast<Task*>(_blocked_head.unlink_back());

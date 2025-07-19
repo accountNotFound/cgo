@@ -63,8 +63,9 @@ TEST(coroutine, destroy) {
 
 TEST(coroutine, catch_exception) {
   suspend_cnt = 0;
-  auto f = biz(bar_throw_threshold * 2);
-  init(f);
+  auto g = biz(bar_throw_threshold * 2);
+  init(g);
+  auto f = std::move(g);
   for (int i = 0; !done(f); i++) {
     // ::printff("main\n");
     if (i >= bar_throw_threshold) {

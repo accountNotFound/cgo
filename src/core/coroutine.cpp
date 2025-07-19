@@ -1,17 +1,12 @@
 #include "core/coroutine.h"
 
-#include <iostream>
-
 namespace cgo::_impl {
 
 BaseFrame::BaseFrame(BaseFrame&& rhs) {
-  if (_promise && _promise->_onwer) {
-    std::cerr << "coroutine can't be moved anymore after `init()` or `co_await`\n";
-    std::exit(EXIT_FAILURE);
-  }
   _destroy();
   std::swap(_handler, rhs._handler);
   std::swap(_promise, rhs._promise);
+  _promise->_onwer = this;
 }
 
 void BaseFrame::_destroy() {
@@ -30,7 +25,7 @@ void BaseFrame::BasePromise::_call_stack_push(BaseFrame::BasePromise* callee) {
 
 auto BaseFrame::BasePromise::_call_stack_pop() -> BaseFrame::BasePromise* {
   auto current = _entry->_current;
-  auto next = current->prev();
+  auto next = current->front();
   if (next) {
     next->unlink_back();
   }
@@ -39,7 +34,6 @@ auto BaseFrame::BasePromise::_call_stack_pop() -> BaseFrame::BasePromise* {
 
 void FrameOperator::_call_stack_create(BaseFrame& entry) {
   auto promise = entry._promise;
-  promise->_onwer = &entry;
   promise->_entry = promise->_current = promise;
 }
 
@@ -48,7 +42,7 @@ void FrameOperator::_call_stack_destroy(BaseFrame& entry) {
   auto current = promise->_entry->_current;
   while (current) {
     auto handler = current->_onwer->_handler;
-    auto next = current->prev();
+    auto next = current->front();
     current->_onwer->_handler = nullptr;
     handler.destroy();
     current = next;

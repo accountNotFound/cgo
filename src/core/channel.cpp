@@ -117,7 +117,7 @@ auto BaseChannel::send_to(BaseMsg* dst, bool oneshot) -> TransferStatus {
   std::unique_lock guard(_mtx);
   dst->_chan = this;
   if (_buffer_send_to(dst)) {
-    while (_sender_head.next() != &_sender_tail) {
+    while (_sender_head.back() != &_sender_tail) {
       auto sender = _sender_head.unlink_back();
       if (_buffer_recv_from(sender)) {
         break;
@@ -125,8 +125,8 @@ auto BaseChannel::send_to(BaseMsg* dst, bool oneshot) -> TransferStatus {
     }
     return TransferStatus::Ok;
   }
-  while (_sender_head.next() != &_sender_tail) {
-    auto status = const_cast<BaseMsg*>(_sender_head.next())->send_to(dst);
+  while (_sender_head.back() != &_sender_tail) {
+    auto status = const_cast<BaseMsg*>(_sender_head.back())->send_to(dst);
     if (status == BaseMsg::TransferStatus::Ok) {
       _sender_head.unlink_back();
       return TransferStatus::Ok;
@@ -148,7 +148,7 @@ auto BaseChannel::recv_from(BaseMsg* src, bool oneshot) -> TransferStatus {
   std::unique_lock guard(_mtx);
   src->_chan = this;
   if (_buffer_recv_from(src)) {
-    while (_recver_head.next() != &_recver_tail) {
+    while (_recver_head.back() != &_recver_tail) {
       auto recver = _recver_head.unlink_back();
       if (_buffer_send_to(recver)) {
         break;
@@ -156,8 +156,8 @@ auto BaseChannel::recv_from(BaseMsg* src, bool oneshot) -> TransferStatus {
     }
     return TransferStatus::Ok;
   }
-  while (_recver_head.next() != &_recver_tail) {
-    auto status = const_cast<BaseMsg*>(_recver_head.next())->recv_from(src);
+  while (_recver_head.back() != &_recver_tail) {
+    auto status = const_cast<BaseMsg*>(_recver_head.back())->recv_from(src);
     if (status == BaseMsg::TransferStatus::Ok) {
       _recver_head.unlink_back();
       return TransferStatus::Ok;
