@@ -18,8 +18,7 @@ namespace cgo {
 
 void Context::start(size_t n_worker) {
   if (_finished) {
-    std::cerr << "try to start but context is stopped\n";
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("restart context");
   }
   _barrier = std::make_unique<std::barrier<>>(n_worker);
   _sched_ctx = std::make_unique<_impl::SchedContext>(*this, n_worker);

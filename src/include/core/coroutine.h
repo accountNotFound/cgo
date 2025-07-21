@@ -9,13 +9,13 @@ namespace cgo::_impl {
 template <typename T>
 class BaseLinked {
  public:
-  auto prev() -> T* const
+  auto front() -> T* const
     requires std::is_base_of_v<BaseLinked<T>, T>
   {
     return static_cast<T*>(_prev);
   }
 
-  auto next() -> T* const
+  auto back() -> T* const
     requires std::is_base_of_v<BaseLinked<T>, T>
   {
     return static_cast<T*>(_next);
@@ -102,6 +102,8 @@ class BaseFrame {
 
   virtual ~BaseFrame() { _destroy(); }
 
+  BaseFrame& operator=(BaseFrame&&) = delete;
+
  protected:
   class BasePromise : private BaseLinked<BasePromise> {
     friend class BaseLinked<BasePromise>;
@@ -172,7 +174,9 @@ class BaseFrame {
   BaseFrame() = default;
 
   template <typename T>
-  BaseFrame(std::coroutine_handle<T> h) : _handler(h), _promise(&h.promise()) {}
+  BaseFrame(std::coroutine_handle<T> h) : _handler(h), _promise(&h.promise()) {
+    _promise->_onwer = this;
+  }
 
   void _destroy();
 };

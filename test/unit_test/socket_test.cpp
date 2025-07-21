@@ -1,5 +1,6 @@
 #include <cmath>
 #include <iostream>
+#include <random>
 
 #include "core/channel.h"
 #include "core/context.h"
@@ -34,6 +35,8 @@ struct Config {
     oss << "client num: " << cli_num << "\n";
     oss << "client interval ms: " << cli_interval_ms << "\n";
     oss << "test duration sec: " << test_duration_sec << "\n";
+    oss << "request package size: " << req_pkg_nbytes << "\n";
+    oss << "response package size: " << res_pgk_nbytes << "\n";
     return oss.str();
   }
 };
@@ -184,11 +187,13 @@ struct Metric {
 
 std::string generate_test_data(size_t size) {
   static const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  static thread_local std::minstd_rand rng;
+
   std::string data;
   data.reserve(size);
 
   for (size_t i = 0; i < size; ++i) {
-    data += charset[rand() % (sizeof(charset) - 1)];
+    data += charset[rng() % (sizeof(charset) - 1)];
   }
 
   return data;
@@ -357,11 +362,11 @@ TEST(socket, tcp_bench) {
   conf.svr_port = 8080;
   conf.sock_timeout_ms = 2000;
   conf.cli_num = 1000;
-  conf.cli_interval_ms = 50;
-  conf.cli_ctx_threads = 1;
-  conf.svr_ctx_threads = 1;
-  conf.req_pkg_nbytes = 1024;
-  conf.res_pgk_nbytes = 1024;
+  conf.cli_interval_ms = 0;
+  conf.cli_ctx_threads = 2;
+  conf.svr_ctx_threads = 2;
+  conf.req_pkg_nbytes = 512;
+  conf.res_pgk_nbytes = 512;
   tcp_benchmark_test(conf);
   std::cout << "\n\n";
 }
@@ -549,10 +554,10 @@ TEST(socket, udp_bench) {
   conf.svr_port = 8081;
   conf.sock_timeout_ms = 2000;
   conf.cli_num = 1000;
-  conf.cli_interval_ms = 50;
-  conf.cli_ctx_threads = 1;
-  conf.svr_ctx_threads = 1;
-  conf.req_pkg_nbytes = 1024;
-  conf.res_pgk_nbytes = 1024;
+  conf.cli_interval_ms = 0;
+  conf.cli_ctx_threads = 4;
+  conf.svr_ctx_threads = 4;
+  conf.req_pkg_nbytes = 512;
+  conf.res_pgk_nbytes = 512;
   udp_benchmark_test(conf);
 }
