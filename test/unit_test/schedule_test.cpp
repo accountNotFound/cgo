@@ -9,7 +9,7 @@ TEST(schedule, yield) {
   std::atomic<int> res = 0;
 
   cgo::Context ctx;
-  ctx.start(exec_num);
+  ctx.startup(exec_num);
   for (int i = 0; i < foo_num; i++) {
     cgo::spawn(ctx, [](std::atomic<int>& res) -> cgo::Coroutine<void> {
       for (int i = 0; i < foo_loop; i++) {
@@ -21,7 +21,7 @@ TEST(schedule, yield) {
   while (res < foo_num) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.stop();
+  ctx.shutdown();
   ASSERT(res == foo_num, "");
 }
 
@@ -30,7 +30,7 @@ TEST(schedule, mutex) {
   cgo::Mutex mtx;
 
   cgo::Context ctx;
-  ctx.start(exec_num);
+  ctx.startup(exec_num);
   for (int i = 0; i < foo_num; i++) {
     cgo::spawn(ctx, [](std::atomic<int>& res, cgo::Mutex& mtx) -> cgo::Coroutine<void> {
       for (int i = 0; i < foo_loop; i++) {
@@ -44,7 +44,7 @@ TEST(schedule, mutex) {
   while (res < foo_num * foo_loop) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.stop();
+  ctx.shutdown();
   ASSERT(res == foo_num * foo_loop, "");
 }
 
@@ -54,7 +54,7 @@ TEST(schedule, force_stop) {
   bool done = false;
 
   cgo::Context ctx;
-  ctx.start(exec_num);
+  ctx.startup(exec_num);
   for (int i = 0; i < foo_num; ++i) {
     cgo::spawn(ctx, [](decltype(mtx)& mtx, decltype(res)& res, decltype(done)& done) -> cgo::Coroutine<void> {
       co_await mtx.lock();
@@ -65,7 +65,7 @@ TEST(schedule, force_stop) {
   while (!done) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.stop();
+  ctx.shutdown();
   ASSERT(res == 1, "");
 }
 
@@ -75,7 +75,7 @@ TEST(schedule, mulit_context) {
 
   cgo::Context ctxs[exec_num];
   for (int i = 0; i < exec_num; ++i) {
-    ctxs[i].start(1);
+    ctxs[i].startup(1);
   }
 
   auto sum = [&res]() {
@@ -105,7 +105,7 @@ TEST(schedule, mulit_context) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
   for (int j = 0; j < exec_num; ++j) {
-    ctxs[j].stop();
+    ctxs[j].shutdown();
   }
 }
 
@@ -130,8 +130,8 @@ TEST(schedule, multi_ctx_force_stop) {
   };
 
   cgo::Context ctx1, ctx2;
-  ctx1.start(exec_num);
-  ctx2.start(2);
+  ctx1.startup(exec_num);
+  ctx2.startup(2);
 
   int target1 = foo_num * 0.2;
   int target2 = foo_num - target1;
@@ -141,13 +141,13 @@ TEST(schedule, multi_ctx_force_stop) {
   }
   while (res1 < target1 || res2 < target2) {
     if (done1 && !ctx1.closed()) {
-      ctx1.stop();
+      ctx1.shutdown();
     }
     if (done2 && !ctx2.closed()) {
-      ctx2.stop();
+      ctx2.shutdown();
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx1.stop();
-  ctx2.stop();
+  ctx1.shutdown();
+  ctx2.shutdown();
 }

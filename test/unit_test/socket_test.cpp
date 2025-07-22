@@ -187,7 +187,7 @@ struct Metric {
 
 std::string generate_test_data(size_t size) {
   static const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  static thread_local std::minstd_rand rng;
+  std::minstd_rand rng;
 
   std::string data;
   data.reserve(size);
@@ -303,47 +303,56 @@ cgo::Coroutine<void> tcp_server(const Config& conf, Metric& metric) {
   sock.bind(conf.is_v6 ? "::" : "0.0.0.0", conf.svr_port);
   sock.listen(conf.svr_listen_size);
 
-  cgo::Context session_ctx;
   size_t session_num = 0;
   std::atomic<size_t> session_wg = 0;
-  session_ctx.start(conf.svr_ctx_threads);
+  std::vector<cgo::Context> session_ctx(conf.svr_ctx_threads);
+  for (auto& ctx : session_ctx) {
+    ctx.startup(1);
+  }
 
   auto session_guard = cgo::defer([&session_ctx, &session_wg, session_num]() {
     while (session_wg.load() < session_num) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    session_ctx.stop();
+    for (auto& ctx : session_ctx) {
+      ctx.shutdown();
+    }
   });
 
-  while (true) {
-    auto conn = co_await sock.accept(session_ctx);
+  for (size_t i = 0;;) {
+    auto conn = co_await sock.accept(session_ctx[i % session_ctx.size()]);
     if (!conn) {
       continue;
     }
     metric.conn_total_num.inc();
-    cgo::spawn(session_ctx, tcp_session(conf, *conn, metric, session_wg));
+    cgo::spawn(session_ctx[i % session_ctx.size()], tcp_session(conf, *conn, metric, session_wg));
+    ++i;
   }
 }
 
 void tcp_benchmark_test(Config& conf) {
   Metric svr_metric;
   cgo::Context svr_ctx;
-  svr_ctx.start(1);
+  svr_ctx.startup(1);
   cgo::spawn(svr_ctx, tcp_server(conf, svr_metric));
 
   Metric cli_metric;
-  cgo::Context cli_ctx;
-  cli_ctx.start(conf.cli_ctx_threads);
+  std::vector<cgo::Context> cli_ctx(conf.cli_ctx_threads);
+  for (auto& ctx : cli_ctx) {
+    ctx.startup(1);
+  }
   std::atomic<size_t> cli_wg = 0;
   for (int i = 0; i < conf.cli_num; ++i) {
-    cgo::spawn(cli_ctx, tcp_client(conf, cli_metric, cli_wg));
+    cgo::spawn(cli_ctx[i % cli_ctx.size()], tcp_client(conf, cli_metric, cli_wg));
   }
 
   while (cli_wg.load() < conf.cli_num) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
-  cli_ctx.stop();
-  svr_ctx.stop();
+  for (auto& ctx : cli_ctx) {
+    ctx.shutdown();
+  }
+  svr_ctx.shutdown();
 
   ::printf("TCP benchmark result:\n");
   ::printf("Config:\n");
@@ -490,19 +499,23 @@ cgo::Coroutine<void> udp_server(const Config& conf, Metric& metric) {
 
   sock.bind(conf.is_v6 ? "::" : "0.0.0.0", conf.svr_port);
 
-  cgo::Context session_ctx;
   size_t session_num = 0;
   std::atomic<size_t> session_wg = 0;
+  std::vector<cgo::Context> session_ctx(conf.svr_ctx_threads);
+  for (auto& ctx : session_ctx) {
+    ctx.startup(1);
+  }
 
-  session_ctx.start(conf.svr_ctx_threads);
   auto session_guard = cgo::defer([&session_ctx, &session_wg, session_num]() {
     while (session_wg.load() < session_num) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    session_ctx.stop();
+    for (auto& ctx : session_ctx) {
+      ctx.shutdown();
+    }
   });
 
-  while (true) {
+  for (size_t i = 0;;) {
     {
       auto req = co_await sock.recvfrom(1);
       if (!req) {
@@ -512,7 +525,8 @@ cgo::Coroutine<void> udp_server(const Config& conf, Metric& metric) {
       auto& [cli_ip, cli_port] = source;
 
       session_num++;
-      cgo::spawn(session_ctx, udp_session(conf, cli_ip, cli_port, metric, session_wg));
+      cgo::spawn(session_ctx[i % session_ctx.size()], udp_session(conf, cli_ip, cli_port, metric, session_wg));
+      ++i;
     }
   }
 }
@@ -520,22 +534,26 @@ cgo::Coroutine<void> udp_server(const Config& conf, Metric& metric) {
 void udp_benchmark_test(Config& conf) {
   Metric svr_metric;
   cgo::Context svr_ctx;
-  svr_ctx.start(1);
+  svr_ctx.startup(1);
   cgo::spawn(svr_ctx, udp_server(conf, svr_metric));
 
   Metric cli_metric;
-  cgo::Context cli_ctx;
-  cli_ctx.start(conf.cli_ctx_threads);
+  std::vector<cgo::Context> cli_ctx(conf.cli_ctx_threads);
+  for (auto& ctx : cli_ctx) {
+    ctx.startup(1);
+  }
   std::atomic<size_t> cli_wg = 0;
   for (int i = 0; i < conf.cli_num; ++i) {
-    cgo::spawn(cli_ctx, udp_client(conf, cli_metric, cli_wg));
+    cgo::spawn(cli_ctx[i % cli_ctx.size()], udp_client(conf, cli_metric, cli_wg));
   }
 
   while (cli_wg.load() < conf.cli_num) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
-  cli_ctx.stop();
-  svr_ctx.stop();
+  for (auto& ctx : cli_ctx) {
+    ctx.shutdown();
+  }
+  svr_ctx.shutdown();
 
   ::printf("UDP benchmark result:\n");
   ::printf("Config:\n");

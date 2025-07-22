@@ -23,7 +23,7 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
   };
 
   cgo::Context ctx;
-  ctx.start(exec_num);
+  ctx.startup(exec_num);
 
   for (int i = 0; i < n_reader; i++) {
     cgo::spawn(ctx,
@@ -54,7 +54,7 @@ void channel_test(int n_writer, int n_reader, int buffer_size) {
   while (r_res < n_reader || w_res < n_writer) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.stop();
+  ctx.shutdown();
   ASSERT(r_res == n_reader && w_res == n_writer, "");
   int total_cnt = 0;
   for (int i = 0; i < msg_num / n_writer; i++) {
@@ -96,7 +96,7 @@ void select_test(int n_writer, int n_reader, int buffer_size) {
   };
 
   cgo::Context ctx;
-  ctx.start(exec_num);
+  ctx.startup(exec_num);
 
   for (int i = 0; i < n_reader; i++) {
     cgo::spawn(ctx,
@@ -135,7 +135,7 @@ void select_test(int n_writer, int n_reader, int buffer_size) {
   while (r_res < n_reader || w_res < n_writer) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.stop();
+  ctx.shutdown();
   ASSERT(r_res == n_reader && w_res == n_writer, "");
 
   int recv_cnt = 0;
@@ -174,8 +174,8 @@ void multi_ctx_nowait_test(int buffer_size) {
   std::vector<int> values(msg_num, -1);
 
   cgo::Context ctx1, ctx2;
-  ctx1.start(n_reader);
-  ctx2.start(1);
+  ctx1.startup(n_reader);
+  ctx2.startup(1);
 
   for (int i = 0; i < n_reader; ++i) {
     cgo::spawn(ctx1, [](decltype(chans[0])& chan, decltype(values)& values) -> cgo::Coroutine<void> {
@@ -213,14 +213,17 @@ void multi_ctx_nowait_test(int buffer_size) {
         }
       }
     }
+
+    // make sure reader pop value out from channel
+    cgo::sleep(cgo::this_coroutine_ctx(), std::chrono::milliseconds(10));
     w_res.fetch_add(1);
   }(chans, w_res));
 
   while (w_res < 1) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx1.stop();
-  ctx2.stop();
+  ctx1.shutdown();
+  ctx2.shutdown();
 
   for (int i = 0; i < msg_num; ++i) {
     ASSERT(values[i] == i, "values[%d]==%d\n", i, values[i]);
@@ -240,7 +243,7 @@ void multi_ctx_stop_test(size_t buffer_size) {
   }
 
   cgo::Context ctx1;
-  ctx1.start(exec_num);
+  ctx1.startup(exec_num);
   for (int i = 0; i < msg_num; ++i) {
     cgo::spawn(ctx1, [](decltype(chans)& chans, int i) -> cgo::Coroutine<void> {
       cgo::Select select;
@@ -253,13 +256,13 @@ void multi_ctx_stop_test(size_t buffer_size) {
 
   std::thread th([&ctx1]() {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    ctx1.stop();
+    ctx1.shutdown();
   });
 
   std::atomic<int> res = 0;
 
   cgo::Context ctx2;
-  ctx2.start(exec_num);
+  ctx2.startup(exec_num);
   for (int i = 0; i < msg_num; ++i) {
     cgo::spawn(ctx2, [](decltype(chans)& chans, decltype(res)& res) -> cgo::Coroutine<void> {
       cgo::Select select;
@@ -272,7 +275,7 @@ void multi_ctx_stop_test(size_t buffer_size) {
     }(chans, res));
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  ctx2.stop();
+  ctx2.shutdown();
   th.join();
 }
 

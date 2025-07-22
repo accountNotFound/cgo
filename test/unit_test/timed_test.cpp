@@ -45,7 +45,7 @@ TEST(timer, sleep) {
 
   std::atomic<size_t> end_num = 0;
   cgo::Context ctx;
-  ctx.start(exec_num);
+  ctx.startup(exec_num);
   for (int i = 0; i < foo_num; ++i) {
     int r = std::rand() % 100 + 1;
     auto ms = std::chrono::milliseconds(r);
@@ -61,7 +61,7 @@ TEST(timer, sleep) {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.stop();
+  ctx.shutdown();
 
   auto end = std::chrono::steady_clock::now();
   auto time_cost = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
@@ -73,7 +73,7 @@ TEST(timer, sleep) {
 TEST(timed, ctx_stop) {
   std::atomic<size_t> end_num = 0;
   cgo::Context ctx;
-  ctx.start(exec_num);
+  ctx.startup(exec_num);
   for (int i = 0; i < foo_num; ++i) {
     int r = std::rand() % 100 + 1;
     cgo::spawn(ctx, foo(i, std::chrono::milliseconds(r), end_num));
@@ -87,5 +87,5 @@ TEST(timed, ctx_stop) {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  ctx.stop();
+  ctx.shutdown();
 }

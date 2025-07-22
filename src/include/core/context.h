@@ -21,9 +21,9 @@ class Context {
 
   Context(Context&&) = delete;
 
-  void start(size_t n_worker);
+  void startup(size_t n_worker);
 
-  void stop();
+  void shutdown();
 
   bool closed() const { return _finished; }
 

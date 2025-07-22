@@ -16,7 +16,7 @@ auto EventContext::at(Context& ctx) -> EventContext& { return *ctx._event_ctx; }
 
 namespace cgo {
 
-void Context::start(size_t n_worker) {
+void Context::startup(size_t n_worker) {
   if (_finished) {
     throw std::runtime_error("restart context");
   }
@@ -29,7 +29,7 @@ void Context::start(size_t n_worker) {
   }
 }
 
-void Context::stop() {
+void Context::shutdown() {
   if (_finished) {
     return;
   }
