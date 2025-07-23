@@ -2,7 +2,7 @@
 
 #include <chrono>
 #include <exception>
-#include <list>
+#include <memory>
 #include <string>
 
 namespace mtest {
@@ -12,45 +12,42 @@ class TestException : public std::exception {
   const char* what() { return "test failed"; }
 };
 
-class TestInterface {
+class BaseTest {
  public:
-  TestInterface() = default;
+  virtual void run() {}
 
-  virtual ~TestInterface() = default;
+  virtual auto name() const -> const char* { return ""; }
+};
 
-  int run(int i, int total) {
-    std::printf(" *** [%d/%d] [%s] test begin\n", i, total, this->_name());
-    try {
-      auto begin = std::chrono::steady_clock::now();
-      this->_run();
-      auto end = std::chrono::steady_clock::now();
-      float time_cost = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() / 1000.0;
-      std::printf(" *** test pass, time cost %f seconds\n\n", time_cost);
-      return 0;
-    } catch (...) {
-      std::printf(" *** test failed\n\n");
-      return -1;
+class Context {
+ public:
+  static int run() {
+    for (size_t i = 0; i < Context::_testers.size(); ++i) {
+      auto& tester = *Context::_testers[i];
+      std::printf(" *** [%lu/%lu] [%s] test begin\n", i, Context::_testers.size(), tester.name());
+      try {
+        auto begin = std::chrono::steady_clock::now();
+        tester.run();
+        auto end = std::chrono::steady_clock::now();
+        float time_cost = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() / 1000.0;
+        std::printf(" *** test pass, time cost %f seconds\n\n", time_cost);
+      } catch (...) {
+        std::printf(" *** test failed\n\n");
+        return -1;
+      }
     }
+    return 0;
+  }
+
+  template <typename T, typename... Args>
+    requires std::is_base_of_v<BaseTest, T>
+  constexpr static void regist(Args&&... args) {
+    Context::_testers.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
   }
 
  protected:
-  virtual void _run() {}
-
-  virtual const char* _name() const { return ""; }
+  inline static std::vector<std::unique_ptr<BaseTest>> _testers = {};
 };
-
-inline static std::list<TestInterface*> g_testers = {};
-
-int main() {
-  int res = 0;
-  int i = 0;
-  for (auto tester : g_testers) {
-    if (tester->run(++i, g_testers.size()) != 0) {
-      res = -1;
-    }
-  }
-  return res;
-}
 
 }  // namespace mtest
 
@@ -60,19 +57,20 @@ int main() {
 
 #define TEST_CLASS(test_name, test_suite_name) Test__##test_name##__##test_suite_name
 
-#define TEST(test_name, test_suite_name)                                                                 \
-  class TEST_CLASS(test_name, test_suite_name) : public mtest::TestInterface {                           \
-   protected:                                                                                            \
-    void _run() override;                                                                                \
-                                                                                                         \
-    const char* _name() const override { return STR(TEST_CLASS(test_name, test_suite_name)); }           \
-  };                                                                                                     \
-                                                                                                         \
-  inline static TEST_CLASS(test_name, test_suite_name)* _g__##test_name##__##test_suite_name##__tester = \
-      dynamic_cast<TEST_CLASS(test_name, test_suite_name)*>(                                             \
-          mtest::g_testers.emplace_back(new TEST_CLASS(test_name, test_suite_name)()));                  \
-                                                                                                         \
-  void TEST_CLASS(test_name, test_suite_name)::_run()
+#define TEST(test_name, test_suite_name)                                                                \
+  class TEST_CLASS(test_name, test_suite_name) {                                                        \
+   private:                                                                                             \
+    class Impl : public mtest::BaseTest {                                                               \
+     public:                                                                                            \
+      auto name() const -> const char* override { return STR(TEST_CLASS(test_name, test_suite_name)); } \
+                                                                                                        \
+      void run() override;                                                                              \
+    };                                                                                                  \
+                                                                                                        \
+    inline static auto _dumpy = (mtest::Context::regist<Impl>(), 0);                                    \
+  };                                                                                                    \
+                                                                                                        \
+  void TEST_CLASS(test_name, test_suite_name)::Impl::run()
 
 #define DISABLE_TEST(test_name, test_suite_name) void disabled_test__##test_name##__##test_suite_name()
 
@@ -96,4 +94,4 @@ int main() {
     }                                              \
   }
 
-int main() { return mtest::main(); }
+int main() { return mtest::Context::run(); }
