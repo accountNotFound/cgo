@@ -208,7 +208,7 @@ class Context;
 template <typename T>
 class Coroutine : public _impl::BaseFrame {
  public:
-  using RetType = T;
+  using Returned = T;
 
   struct promise_type
       : public std::conditional_t<std::is_void_v<T>, _impl::BaseFrame::VoidPromise, _impl::BaseFrame::ValuePromise<T>> {

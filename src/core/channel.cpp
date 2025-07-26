@@ -11,15 +11,14 @@ void BaseMsg::Simplex::commit() {
 }
 
 void BaseMsg::Multiplex::commit() {
-  auto& select = *static_cast<Select*>(this->select);
-  select._key = case_key;
-  select._signal.release();
+  select->_key = case_key;
+  select->_signal.release();
 }
 
 auto BaseMsg::recv_from(void* src) -> BaseMsg::TransferStatus {
   if (std::holds_alternative<Multiplex>(this->_msg)) {
     auto& dst_msg = std::get<Multiplex>(this->_msg);
-    auto& dst_select = *static_cast<Select*>(dst_msg.select);
+    auto& dst_select = *dst_msg.select;
     std::unique_lock guard(dst_select._mtx);
     if (dst_select._key != Select::InvalidSelectKey) {
       return TransferStatus::InvalidSrc;
@@ -38,7 +37,7 @@ auto BaseMsg::recv_from(void* src) -> BaseMsg::TransferStatus {
 auto BaseMsg::send_to(void* dst) -> BaseMsg::TransferStatus {
   if (std::holds_alternative<Multiplex>(this->_msg)) {
     auto& src_msg = std::get<Multiplex>(this->_msg);
-    auto& src_select = *static_cast<Select*>(src_msg.select);
+    auto& src_select = *src_msg.select;
     std::unique_lock guard(src_select._mtx);
     if (src_select._key != Select::InvalidSelectKey) {
       return TransferStatus::InvalidSrc;
@@ -58,8 +57,8 @@ auto BaseMsg::send_to(BaseMsg* dst) -> BaseMsg::TransferStatus {
   if (std::holds_alternative<Multiplex>(this->_msg) && std::holds_alternative<Multiplex>(dst->_msg)) {
     auto& src_msg = std::get<Multiplex>(this->_msg);
     auto& dst_msg = std::get<Multiplex>(dst->_msg);
-    auto& src_select = *static_cast<Select*>(src_msg.select);
-    auto& dst_select = *static_cast<Select*>(dst_msg.select);
+    auto& src_select = *src_msg.select;
+    auto& dst_select = *dst_msg.select;
     auto m1 = &src_select._mtx;
     auto m2 = &dst_select._mtx;
     if (m1 == m2) {

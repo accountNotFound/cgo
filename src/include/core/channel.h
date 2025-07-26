@@ -5,7 +5,11 @@
 
 #include "core/schedule.h"
 
-namespace cgo::_impl {
+namespace cgo {
+
+class Select;
+
+namespace _impl {
 
 class BaseChannel;
 
@@ -24,7 +28,7 @@ class BaseMsg : public BaseLinked<BaseMsg> {
 
   struct Multiplex {
     void* data;
-    void* select;
+    Select* select;
     int case_key;
 
     void commit();
@@ -124,9 +128,7 @@ class TypeChannel : public BaseChannel {
   }
 };
 
-}  // namespace cgo::_impl
-
-namespace cgo {
+}  // namespace _impl
 
 /**
  * @brief Representation for void type
